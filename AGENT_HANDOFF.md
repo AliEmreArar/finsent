@@ -26,7 +26,7 @@ Proje başlangıçta bir CV proje tanımından yola çıktı. Kullanıcı Türk�
 | Kural | Neden |
 |---|---|
 | `finsent/.env` içindeki `XAI_API_KEY` **asla** yazdırılmaz, loglanmaz, commit edilmez. `.env` gitignore'dadır, şablon `.env.example`'dır. | Gerçek, ücretli anahtar |
-| `../bist_model_ready.db` (repo dışında, üst klasörde) **değiştirilmez**. Compose'da salt-okunur bağlanır. | Kullanıcının orijinal geçmiş veritabanı (≤ 2025-11-21) |
+| `../bist_model_ready.db` (repo dışında, üst klasörde) **değiştirilmez**. Uygulama artık birebir kopyasını kullanır: `data/market/bist_model_ready.db` (salt-okunur açılır, `finsent seed` ile de gelir). | Kullanıcının orijinal geçmiş veritabanı (≤ 2025-11-21) |
 | KAP'a **dürüst User-Agent** ile gidilir: `finsent/1.0 (personal research project)`. Bot korumasını aşma ya da sahte UA yok. Rate-limit'e (429) uyulur. | Kullanıcı isteği ve etik |
 | Grok harcaması kullanıcı tarafından onaylandı ("para sorun değil"), ama israf edilmez. | Toplu işlerde hızlı model kullanılır |
 | Yön tahminleri dürüst raporlanır. AUC ≈ 0.5 ise "yazı-tura" denir. | Kullanıcı "53% yazı tura, güvenemem" dedi; şeffaflık istiyor |
@@ -40,7 +40,17 @@ Proje başlangıçta bir CV proje tanımından yola çıktı. Kullanıcı Türk�
 cd finsent
 cp .env.example .env          # XAI_API_KEY girilir (anahtar yoksa lexicon'a düşer)
 docker compose up -d --build
+docker compose exec airflow finsent seed   # veri: GitHub Release data-* (~730 MB)
 ```
+
+**Veri dağıtımı:**
+
+- Veri, GitHub Releases'ta `data-YYYY-MM-DD` etiketiyle yayınlanır (`pipeline/finsent/snapshot.py`).
+- Yeni snapshot için önce `finsent export-snapshot --out data/snapshot_release` (host'ta çalıştırılacaksa `MYSQL_PORT=3307` gerekir), sonra `gh release create data-… data/snapshot_release/*` çalıştırılır.
+- `seed` MySQL tablolarını **TRUNCATE eder**. Kullanıcının canlı veritabanında, onayı olmadan çalıştırmayın.
+- `alerts` ve `drawings` (kişisel) export edilmez.
+- Fiyat verisinin yayınlanmasına kullanıcı karar verdi (Yahoo koşulları riski kendisine bildirildi).
+- `backend/sql/schema.sql` içinde `USE finsent;` var. Başka bir veritabanına uygulamak için önce `sed` ile değiştirin.
 
 | Servis | Adres | Not |
 |---|---|---|
@@ -151,7 +161,8 @@ flowchart LR
 | `intraday.py` | 1m/5m/15m çubuklar → `data/market/intraday.db` |
 | `rescore.py` | xai skoru olmayan tüm geçmiş bildirimleri toplu Grok ile puanlar |
 | `lake_rebuild.py` | S3 gölünü MySQL + fiyat kaynaklarından aynı düzen ve şemayla yeniden yazar (`finsent rebuild-lake`) |
-| `cli.py` | `finsent run`, `analyze`, `patterns`, `reset-disclosures`, `rebuild-lake`, `backfill-kap` (`--retry-from-log`, 429'da 300 sn bekleme, 4 deneme, 6 sn aralık) |
+| `snapshot.py` | `export-snapshot` (tablo başına Parquet, şema MySQL tiplerinden; gz SQLite; modeller; sha256 manifest) ve `seed` (release indir, doğrula, yükle, gölü kur) |
+| `cli.py` | `finsent run`, `analyze`, `patterns`, `reset-disclosures`, `rebuild-lake`, `export-snapshot`, `seed`, `backfill-kap` (`--retry-from-log`, 429'da 300 sn bekleme, 4 deneme, 6 sn aralık) |
 
 ### Grok kullanımı (`sentiment/grok.py`)
 

@@ -34,12 +34,54 @@ FinSent brings Borsa Istanbul market data and KAP (Kamuyu Aydınlatma Platformu)
 
 ## Quick start
 
-Requirements: Docker Desktop with about 6 GB of RAM. The market history at `../bist_model_ready.db` (one level above this folder) is mounted read-only.
+Requirements: Docker Desktop with about 6 GB of RAM and about 4 GB of free disk.
 
 ```bash
-cp .env.example .env              # put XAI_API_KEY (Grok) and/or ANTHROPIC_API_KEY here
+git clone https://github.com/AliEmreArar/finsent && cd finsent
+cp .env.example .env                              # optional: XAI_API_KEY for Grok features
 docker compose up -d --build
+docker compose exec airflow finsent seed          # downloads the data snapshot (~730 MB), ~10 min
 ```
+
+Open http://localhost:8080. Everything except the live LLM features works without an API key: the agent panel, rescoring, X search and the market brief need `XAI_API_KEY`.
+
+### Data snapshot
+
+The data is published as versioned **GitHub Releases** tagged `data-YYYY-MM-DD`; the first one is [data-2026-11-08](https://github.com/AliEmreArar/finsent/releases/tag/data-2026-11-08). Each release has one zstd Parquet file per serving table, the gzipped SQLite price files, the trained models and a `manifest.json` with row counts and sha256 checksums.
+
+`finsent seed` (in `pipeline/finsent/snapshot.py`) does the following:
+
+1. Finds the newest `data-*` release. A specific one can be chosen with `--tag`.
+2. Downloads the assets and verifies every checksum.
+3. Truncates and loads the MySQL tables.
+4. Unpacks the price files into `data/market/` and the models into `data/models/`.
+5. Rebuilds the S3 lake. `--no-lake` skips this step.
+
+Personal tables (chart drawings, alerts) are never exported.
+
+| Content | Rows | Coverage |
+|---|---|---|
+| KAP disclosures | 254,119 | 2021-01-04 → 2026-11-06 |
+| Sentiment scores (Grok + lexicon) | 501,574 | |
+| Daily prices | 2,359,058 | 1996-12-27 → 2026-11-07 |
+| Patterns, event returns, forecasts, research results | | |
+
+After seeding, the daily DAG keeps the data current from Yahoo and KAP.
+
+To publish a new snapshot (maintainer):
+
+```bash
+finsent export-snapshot --out data/snapshot_release
+gh release create data-$(date +%F) data/snapshot_release/* --title "Data snapshot $(date +%F)"
+```
+
+**Sources and terms:**
+
+- **Prices:** Yahoo Finance and the original BIST history. They may be subject to the provider's terms and are shared for research and education only.
+- **Disclosures:** public regulatory filings from KAP (www.kap.org.tr). Cite the source.
+- **Sentiment:** model-generated and may contain errors.
+
+`forecast_v2.joblib` is a pickle. Only load snapshots from this repository.
 
 | Service | URL |
 |---|---|
@@ -62,7 +104,7 @@ The scheduled run (weekdays at 19:30 Istanbul time, after the close) processes t
 
 ## Data sources
 
-- **Market history (real, read-only):** the BIST daily history in `../bist_model_ready.db` (1996 → 2025-11-21, 586 symbols, with indicators). FinSent never writes to this file. It has no opening price, so `open` is set to the previous close and flagged `open_is_estimated`. Candlestick detectors then use stricter thresholds and half strength.
+- **Market history (real, read-only):** the BIST daily history in `data/market/bist_model_ready.db`, delivered by `finsent seed` (1996 → 2025-11-21, 586 symbols, with indicators). FinSent opens it read-only. It has no opening price, so `open` is set to the previous close and flagged `open_is_estimated`. Candlestick detectors then use stricter thresholds and half strength.
 - **Market updates (real, Yahoo Finance):** `python -m finsent.market_refresh` (or the DAG's `refresh_market` task) downloads every active symbol plus XU100 and USDTRY from Yahoo with `yfinance`. It starts at the day after the history ends and writes `data/market/bist_updates.db` with the same columns plus a real open. Indicators are computed on the Yahoo series with about 300 days of warm-up. In the default `FINSENT_MARKET_SOURCE=auto` mode, the pipeline serves the history up to 2025-11-21 and the updates after it; the seam is continuous. Market-cap columns are not available from Yahoo. Symbols that were delisted in the meantime are reported as missing (for example KOZAA and KOZAL).
 - **Intraday quote:** `GET /api/quote/{symbol}` uses Yahoo's chart API (BIST data is about 15 minutes delayed, cached for 60 s). The symbol page shows it with an intraday chart.
 - **KAP disclosures (real):** with `FINSENT_KAP_MODE=live`, `kap_live.py` calls the same public endpoints www.kap.org.tr's own UI uses. It makes one list request per weekday (`POST /tr/api/disclosure/members/byCriteria`, memberType `IGS`). Mechanical notices are dropped (circuit breakers, debt-instrument notices, company info forms, BISTECH announcements). A notice naming several stocks becomes one row per stock. For new, price-relevant notices (special situations, new business, M&A, buybacks, capital increases, dividends, ratings, lawsuits…), the full text is read from `/tr/Bildirim/{index}`. Requests are throttled, retried and sent with an honest User-Agent (`FINSENT_KAP_USER_AGENT`). Respect KAP's terms of use.

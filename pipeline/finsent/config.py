@@ -31,7 +31,7 @@ class Settings:
     market_source: str = field(default_factory=lambda: _env("FINSENT_MARKET_SOURCE", "auto"))
     market_sqlite_path: str = field(
         default_factory=lambda: _env(
-            "FINSENT_MARKET_SQLITE", str(_repo_root().parent / "bist_model_ready.db")
+            "FINSENT_MARKET_SQLITE", str(_repo_root() / "data" / "market" / "bist_model_ready.db")
         )
     )
     # Yahoo bars after the end of the original history (written by market_refresh)

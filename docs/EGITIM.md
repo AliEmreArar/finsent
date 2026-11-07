@@ -231,6 +231,40 @@ erDiagram
 
 > 💡 **Öğrenme notu (yaşanmış hata):** Bir gün bir sütun tamamen boş geldiği için Parquet onu "null" tipiyle yazdı. Ertesi gün dolu geldi, Spark iki dosyayı birleştiremedi. Çözüm: şemayı açıkça tanımlamak (`MARKET_SCHEMA`, `SENTIMENT_SCHEMA`). **Şemayı veriye bırakma, sen belirle.**
 
+
+### 5.1 Veriyi paylaşmak: sürümlü anlık görüntü (snapshot)
+
+**Sorun:** Repoyu klonlayan biri kodu alır, ama veritabanı (~900 MB) ve fiyat geçmişi onun bilgisayarında yoktur. Git büyük ikili dosyalar için uygun değildir.
+
+**Neden canlı bir bulut veritabanı (ör. Supabase) değil?**
+
+- Ücretsiz katmanlar küçük (500 MB) ve kullanılmayınca uykuya geçiyor.
+- Herkese açık bir veritabanı bağlantısı yazma ve kötüye kullanım riski taşır.
+- Proje MySQL kullanıyor, Supabase ise PostgreSQL.
+
+**Çözüm:** veri projelerindeki standart yaklaşım, **sürümlü bir anlık görüntü** yayınlamaktır:
+
+```mermaid
+flowchart LR
+  DB[(MySQL + fiyat dosyaları)] -- "finsent export-snapshot" --> F["Parquet (zstd) + gz SQLite<br/>+ manifest.json (sha256)"]
+  F -- "gh release create data-YYYY-MM-DD" --> R["GitHub Release<br/>(ücretsiz, dosya başına 2 GB)"]
+  R -- "finsent seed" --> L["Kullanıcının bilgisayarı:<br/>MySQL + data/market + S3 gölü"]
+```
+
+| Kavram | Projede |
+|---|---|
+| **Sürümleme** | Her snapshot bir etiket alır (`data-2026-11-08`). Analizler belirli bir veri sürümüne bağlanabilir, yani tekrarlanabilir (reproducible) |
+| **Bütünlük (checksum)** | `manifest.json` her dosyanın sha256'sını taşır. `seed` indirilen dosyayı doğrular; bozuk ya da değiştirilmiş dosya yüklenmez |
+| **Şemayı kaynaktan almak** | Parquet şeması MySQL sütun tiplerinden türetilir. İlk parçada tamamen boş olan bir sütun "null" tipine düşmez |
+| **Kişisel veriyi ayırmak** | Kullanıcının çizimleri ve alarmları yayınlanmaz |
+| **Kaynak ve koşullar** | Release notunda verinin nereden geldiği ve kullanım koşulları yazar |
+
+> 💡 **Öğrenme notu:** Yükleme kodunu canlı veritabanında değil, **ayrı bir test veritabanında** denedik ve satır sayılarıyla içerik parmak izlerini (MD5, toplamlar) karşılaştırdık. Bu sırada iki ders çıktı:
+>
+> - `schema.sql` içindeki `USE finsent;` satırı, şemayı yanlış veritabanına uygulatabiliyordu. Neyse ki dosyada yalnızca `CREATE … IF NOT EXISTS` vardı, zarar olmadı.
+> - Birim testi, boş tarihin (`NaT`) MySQL'e yanlış gittiğini yakaladı.
+>
+> **Veri silen (TRUNCATE) bir komutu ilk kez çalıştırmadan önce, hedefini iki kez kontrol et.**
 ---
 
 ## 6. Orkestrasyon: Apache Airflow
@@ -700,5 +734,7 @@ sequenceDiagram
 | Rank IC | Tahmin sırası ile gerçekleşen sıra arasındaki korelasyon |
 | Rate limit | Bir servisin izin verdiği istek hızı |
 | Sharpe oranı | Getiri ÷ oynaklık. Risk başına getiri |
+| Snapshot | Verinin belirli bir andaki sürümlü kopyası |
+| Checksum (sha256) | Dosyanın parmak izi. Bozulma ve değişikliği yakalar |
 | Upsert | Varsa güncelle, yoksa ekle |
 | Walk-forward | Zamana saygılı, ileri yürüyen test yöntemi |

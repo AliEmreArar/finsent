@@ -107,7 +107,7 @@ services:
       FINSENT_S3_BUCKET: ${FINSENT_S3_BUCKET:-finsent-lake}
       # sources
       FINSENT_MARKET_SOURCE: ${FINSENT_MARKET_SOURCE:-auto}
-      FINSENT_MARKET_SQLITE: /data/bist_model_ready.db
+      FINSENT_MARKET_SQLITE: /opt/finsent/data/market/bist_model_ready.db   # from `finsent seed` (opened read-only)
       FINSENT_MARKET_UPDATES: /opt/finsent/data/market/bist_updates.db
       FINSENT_KAP_MODE: ${FINSENT_KAP_MODE:-live}
       FINSENT_KAP_SAMPLE: /opt/finsent/data/samples/kap_disclosures_sample.jsonl
@@ -123,7 +123,6 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags:ro
       - ./data:/opt/finsent/data          # writable: Yahoo market updates land in data/market/
-      - ../bist_model_ready.db:/data/bist_model_ready.db:ro
       - airflow-logs:/opt/airflow/logs
     depends_on:
       mysql: {condition: service_healthy}

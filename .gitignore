@@ -22,3 +22,7 @@ data/models/
 airflow/logs/
 .env.*
 !.env.example
+
+# snapshot builds / downloads
+data/snapshot/
+data/snapshot_release/

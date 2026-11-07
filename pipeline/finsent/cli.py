@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from pathlib import Path
 from datetime import date, datetime
 
 from . import jobs, market, patterns
@@ -126,9 +127,26 @@ def main(argv: list[str] | None = None) -> None:
     lk.add_argument("--end", type=_d, required=True)
     lk.add_argument("--parts", default="market,kap,patterns,index", help="comma list: market,kap,patterns,index")
 
+    ex = sub.add_parser("export-snapshot", help="maintainer: dump serving DB + market files into a release folder")
+    ex.add_argument("--out", default="data/snapshot_release")
+
+    sd = sub.add_parser("seed", help="download the newest data-* GitHub release and load MySQL, market files and the lake")
+    sd.add_argument("--tag", help="a specific release tag (default: newest data-*)")
+    sd.add_argument("--no-lake", action="store_true", help="skip rebuilding the S3 lake")
+    sd.add_argument("--keep-downloads", action="store_true")
+
     args = ap.parse_args(argv)
     settings = get_settings()
 
+    if args.cmd == "export-snapshot":
+        from .snapshot import export
+        print(json.dumps(export(settings, Path(args.out)), indent=2))
+        return
+    if args.cmd == "seed":
+        from .snapshot import seed
+        print(json.dumps(seed(settings, tag=args.tag, lake=not args.no_lake, keep_downloads=args.keep_downloads),
+                         indent=2, default=str))
+        return
     if args.cmd == "rebuild-lake":
         from .lake_rebuild import rebuild
         print(json.dumps(rebuild(settings, args.start, args.end, parts=tuple(args.parts.split(","))), indent=2))
