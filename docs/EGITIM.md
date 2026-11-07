@@ -375,6 +375,13 @@ Her örüntü bir yön (boğa/ayı/nötr) ve bir güç skoru taşır.
 
 **Olay çalışması (event study, `event_returns`):** "Bu tür bir olaydan sonra fiyat 1/5/20 günde ortalama ne yaptı?" sorusunun cevabı. Arayüzde **KAP → Etki analizi** sekmesi, KAP bildirim türlerinin ve duygu skorlarının sonraki getirilerle ilişkisini gösterir.
 
+> 💡 **Projeden gerçek bulgu (`scripts/news_event_study.py`, 2021–2026, ~108 bin olay):**
+>
+> - **Olumlu bildirim:** fiyata **aynı gün** yansıyor (endeksin +%0,43 üstü, güçlü olumlularda +%0,96). Sonraki günlerde ek kazanç yok.
+> - **Olumsuz bildirim:** piyasa yavaş sindiriyor; 20 günde endeksin −%0,53 altında kalınıyor.
+> - **Finans teorisindeki karşılığı:** "piyasa etkinliği" (iyi haber hemen fiyatlanır) ve "kötü habere yetersiz tepki" (bilinen bir anomali).
+> - **Modele etkisi:** haber özellikleri tahmin modelinin AUC'sini artırmadı. Etki gerçek ama küçük ve az sayıda hisse-günü etkiliyor. **Anlamlı bir etki her zaman modeli iyileştiren bir özellik demek değildir.**
+
 ---
 
 ## 11. Makine öğrenmesi ile tahmin

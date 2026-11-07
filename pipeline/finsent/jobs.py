@@ -97,7 +97,7 @@ def ingest_disclosures(settings: Settings, start: date, end: date, run_id: str) 
         from .kap_live import KapLiveClient
         new, cache = KapLiveClient(settings).enrich_bodies(new)
         bodies = len(cache)
-    for day, part in new.groupby(new["published_at"].dt.date):
+    for day, part in new.groupby(pd.to_datetime(new["published_at"]).dt.date):
         lake.put_jsonl(f"raw/kap/published_date={day}/{run_id}.jsonl", kap.to_records(part))
     # Persist the index only after the raw data is safely written.
     lake.put_json(DEDUP_INDEX_KEY, index)
@@ -135,7 +135,7 @@ def score_sentiment(settings: Settings, start: date, end: date, run_id: str) -> 
     results = analyze_many(analyzer, items)
     scored = pd.DataFrame([r.model_dump() for r in results])
     scored.insert(0, "disclosure_id", df["disclosure_id"].values)
-    scored["published_date"] = df["published_at"].dt.date.values
+    scored["published_date"] = pd.to_datetime(df["published_at"]).dt.date.values
     for day, part in scored.groupby("published_date"):
         lake.put_parquet(f"curated/sentiment/published_date={day}/{run_id}.parquet",
                          part.drop(columns="published_date"), schema=SENTIMENT_SCHEMA)

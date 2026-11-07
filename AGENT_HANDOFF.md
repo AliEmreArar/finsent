@@ -167,8 +167,8 @@ flowchart LR
 | Tablo | Kayıt | Aralık |
 |---|---|---|
 | `market_daily` | 2.359.058 | 1996-12-27 → 2026-11-07. 642 sembol (hisseler + enstrümanlar) |
-| `disclosures` | 224.379 | 2021-10-25 → 2026-11-06. KAP geçmiş backfill'i **hâlâ çalışıyor** |
-| `disclosure_sentiment` | lexicon 219.884, xai 220.157 | `v_sentiment` görünümü lexicon dışı sağlayıcıyı tercih eder |
+| `disclosures` | ~252.000 | 2021-01-04 → 2026-11-06. Geçmiş backfill tamamlandı |
+| `disclosure_sentiment` | xai: tüm bildirimler + lexicon | `v_sentiment` görünümü lexicon dışı sağlayıcıyı tercih eder |
 
 Diğer tablolar: `companies`, `event_returns`, `patterns`, `llm_insights`, `pipeline_runs`, `dq_reports`, `model_evaluations`, `social_sentiment`, `market_briefs`, `forecasts`, `research_results`, `alerts`, `drawings`. Şema: `backend/sql/schema.sql`.
 
@@ -192,7 +192,7 @@ Ayrıntılar `docs/forecast_research.md` dosyasında.
   - `forecast.run()` haftada bir yeniden eğitir (`retrain_after_days=7`), diğer günler `data/models/forecast_v2.joblib` ile yalnızca tahmin yapar;
   - son 365 gün holdout'u MLflow `finsent-forecast` deneyine yazılır;
   - `forecasts` tablosuna payload `version: "v2"` olarak kaydedilir.
-- **Henüz yapılmadı:** KAP ve X duygu skorları model özelliği değil. `scripts/forecast_news_lab.py` bunun A/B testini hazırlıyor ama **çalıştırılmadı** (bkz. §10).
+- **KAP haber özellikleri test edildi, eklenmedi.** `scripts/forecast_news_lab.py` sonuçlarına göre AUC ve IC farkı ±0,001. Olay çalışması: `scripts/news_event_study.py`.
 
 ## 8. Altın tahmini (`gold_forecast.py`, payload `gold-v1`)
 
@@ -226,18 +226,22 @@ Ayrıntılar `docs/forecast_research.md` dosyasında.
 
 ## 10. Açık işler (sıralı)
 
-1. **KAP geçmiş backfill'i:**
-   - log: `data/research/kap_backfill.log`; bitince logda `"windows"` özeti görünür;
-   - başarısız pencereler: `finsent backfill-kap --retry-from-log data/research/kap_backfill.log`;
-   - bu oturumdaki arka plan izleme görevi yalnızca o oturumda geçerlidir.
-2. **Rescore:** `data/research/rescore.log` kontrol edilir. Yeni gelen backfill bildirimleri için `python -m finsent.rescore` tekrar çalıştırılır.
-3. **Airflow imajını yeniden derleyin.** docker cp ile atılan dosyalar (`gold_forecast.py` vb.) imaja girsin: `docker compose build airflow && docker compose up -d airflow`.
-4. **Haber özellikli tahmin A/B testi:** `scripts/forecast_news_lab.py` çalıştırılır. Gerekenler: `data/research/features.parquet` ve MySQL portu 3307. Haber özellikleri yalnızca walk-forward metrikleri gerçekten iyileşirse `forecast.py`'ye alınır.
-5. Lakehouse DAG'ı yeniden çalıştırılır (yeni bildirimler silver/gold katmanına girsin).
-6. Kullanıcıya Türkçe özet verilir.
-7. **Test alarmı:** id 2 (THYAO fiyat > 310) hâlâ aktif. Kullanıcıya söylendi.
+Tamamlananlar (2026-11-08):
+
+- KAP geçmiş backfill'i bitti: 122 pencere, 193.499 yeni bildirim. Tek hata veren gün (2021-01-01) boş DataFrame'de `.dt` hatasıydı; `jobs.py` düzeltildi ve gün yeniden çekildi.
+- Rescore bitti: tüm bildirimler (~252 bin, 2021-01-04 → bugün) Grok skorlu.
+- Airflow imajı yeniden derlendi; docker cp ile atılan dosyalar artık imajda.
+- Haber özellikli tahmin A/B testi yapıldı: **iyileştirme yok**, haber özellikleri eklenmedi. Olay çalışması yapıldı (`docs/forecast_research.md` → "KAP news"). Bulgu: olumlu haber aynı gün fiyatlanıyor; olumsuz haberde 20 günde −%0,5'lik gecikmeli tepki var.
+- Lakehouse DAG yeni KAP geçmişiyle yeniden tetiklendi (`manual__2026-11-07T21:31:56`).
+
+Açık kalanlar:
+
+1. **Test alarmı:** id 2 (THYAO fiyat > 310) hâlâ aktif. Kullanıcıya söylendi.
+2. Fikir havuzundan kullanıcının seçeceği iş.
 
 ### Fikir havuzu (yapılmadı)
+
+- **Olumsuz KAP bildirimi uyarı rozeti:** hisse sayfasında ve ajan bağlamında gösterilir. Olay çalışmasına göre olumsuz haber sonrası 20 günde endeksin ~%0,5 altında kalınıyor.
 
 - Gümüş (XAGUSD/GUMUS) için de aralık modeli.
 - Hisseler için de oynaklık ve aralık bantları (altında kalibre çıktı; hisselerde de büyük ihtimalle işe yarar).

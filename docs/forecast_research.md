@@ -62,4 +62,43 @@ Analogs are no better than the stock's long-run up-rate. In v2 they are shown as
 
 - Absolute direction stays close to a coin flip: AUC 0.55–0.57, and calibration is off by 4–8 pp depending on the market regime.
 - Part of the 1-day effect is short-term reversal in closing prices (bid/ask bounce, price limits). Not all of it can be traded.
-- KAP and X sentiment are not model features yet: only about five weeks of real disclosures exist. Add them once a few months have accumulated, and re-run this study.
+- KAP sentiment was tested as a model feature once the 2021–2026 history was loaded (see below). It does not help, so it is not in the production model. X sentiment is still untested because it has no history.
+
+## KAP news: A/B test and event study (2026-11-08)
+
+The KAP history from 2021-01 to 2026-11 is now loaded: about 252 k disclosures, all scored by Grok.
+
+### A/B test
+
+`scripts/forecast_news_lab.py` compares two models on the same walk-forward folds (2023, 2024, 2025–26; both trained from 2021):
+
+- **BASE:** the production feature set.
+- **BASE + NEWS:** the same set plus nine per-stock news features. These are counts, positive and negative shares, and mean sentiment over 5 and 20 days, plus days since the last disclosure and since the last negative one. They are aligned to the information day: a notice published after 18:00 counts for the next session.
+
+| Target | h | AUC base → +news | Rank IC base → +news |
+|---|---|---|---|
+| absolute | 1 / 5 / 20 | .537 / .536 / .547 → .537 / .537 / .546 | .072 / .075 / .091 → .071 / .075 / .090 |
+| beat index | 1 / 5 / 20 | .521 / .508 / .523 → .522 / .508 / .523 | .063 / .070 / .090 → .064 / .071 / .090 |
+
+All differences are within ±0.001, with mixed signs. **Decision: news features are not added.**
+
+### Event study
+
+`scripts/news_event_study.py` measures the excess return over BIST 100 per stock-day event, with the label taken from mean Grok score at a threshold of ±0.15. Each row covers one label (or strong subgroup) and three windows:
+
+- **Day 0:** the information day itself.
+- **Days 1–5:** the post-event drift over the next 5 trading days.
+- **Days 1–20:** the post-event drift over the next 20 trading days.
+
+| Label | Events | Day 0 | Days 1–5 | Days 1–20 |
+|---|---|---|---|---|
+| positive | 33,292 | **+0.43 %** (t = 21) | −0.09 % (t = −2.0) | −0.10 % (t = −1.1) |
+| strong positive (score ≥ 0.6) | 3,857 | **+0.96 %** (t = 15) | −0.22 % (t = −1.5) | – |
+| neutral | 66,387 | −0.03 % | −0.06 % | +0.11 % |
+| negative | 8,687 | −0.04 % (t = −1.0) | **−0.24 %** (t = −2.4) | **−0.53 %** (t = −2.7) |
+
+How to read this:
+
+- **Good news is priced on the same day.** Nothing tradable is left after the disclosure is read.
+- **Bad news is absorbed slowly.** This is the known under-reaction to negative news. The effect is real but small (about 0.5 % over a month), and it affects only about 4 % of stock-days with news. That is why it does not lift a model that ranks every stock every day.
+- **What it is good for:** a warning flag on the stock page ("recent negative disclosure: historically −0.5 % vs the index over the next month"), not a model feature.
