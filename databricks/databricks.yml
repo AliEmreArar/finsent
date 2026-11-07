@@ -1,0 +1,44 @@
+# Databricks Asset Bundle for the FinSent lakehouse workflow.
+#
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run finsent_lakehouse -t dev
+#
+# The job reads the raw zone that the Airflow DAG writes to S3 and maintains
+# Delta tables + an MLflow experiment. Locally the same code runs inside the
+# Airflow container (see airflow/dags/finsent_lakehouse.py).
+bundle:
+  name: finsent
+
+variables:
+  lake_bucket:
+    description: S3 bucket holding the raw zone and Delta tables
+    default: finsent-lake
+  uc_schema:
+    description: Unity Catalog schema to register Delta tables in (catalog.schema)
+    default: main.finsent
+  instance_profile_arn:
+    description: Instance profile with read/write access to the lake bucket
+    default: ""
+
+artifacts:
+  finsent_pipeline:
+    type: whl
+    path: ../pipeline
+    build: python -m pip wheel --no-deps -w dist .
+  finsent_lakehouse:
+    type: whl
+    path: .
+    build: python -m pip wheel --no-deps -w dist .
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}

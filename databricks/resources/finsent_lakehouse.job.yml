@@ -1,0 +1,47 @@
+resources:
+  jobs:
+    finsent_lakehouse:
+      name: finsent-lakehouse
+      max_concurrent_runs: 1
+      tags:
+        project: finsent
+      job_clusters:
+        - job_cluster_key: main
+          new_cluster:
+            spark_version: 15.4.x-scala2.12   # Spark 3.5 / Delta 3.2 (LTS)
+            node_type_id: m5d.large
+            num_workers: 1
+            data_security_mode: SINGLE_USER
+            aws_attributes:
+              instance_profile_arn: ${var.instance_profile_arn}
+            spark_env_vars:
+              FINSENT_S3_BUCKET: ${var.lake_bucket}
+              FINSENT_UC_SCHEMA: ${var.uc_schema}
+              FINSENT_LLM_PROVIDER: auto
+              # ANTHROPIC_API_KEY: "{{secrets/finsent/anthropic_api_key}}"
+      tasks:
+        - task_key: bronze
+          job_cluster_key: main
+          python_wheel_task: {package_name: finsent_lakehouse, entry_point: finsent-bronze}
+          libraries: &libs
+            - whl: ../pipeline/dist/*.whl
+            - whl: ./dist/*.whl
+          max_retries: 2
+          min_retry_interval_millis: 60000
+        - task_key: silver
+          depends_on: [{task_key: bronze}]
+          job_cluster_key: main
+          python_wheel_task: {package_name: finsent_lakehouse, entry_point: finsent-silver}
+          libraries: *libs
+          max_retries: 2
+        - task_key: gold
+          depends_on: [{task_key: silver}]
+          job_cluster_key: main
+          python_wheel_task: {package_name: finsent_lakehouse, entry_point: finsent-gold}
+          libraries: *libs
+          max_retries: 2
+        - task_key: evaluate
+          depends_on: [{task_key: gold}]
+          job_cluster_key: main
+          python_wheel_task: {package_name: finsent_lakehouse, entry_point: finsent-evaluate}
+          libraries: *libs

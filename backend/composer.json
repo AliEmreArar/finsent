@@ -1,0 +1,22 @@
+{
+    "name": "finsent/backend",
+    "description": "FinSent PHP/MySQL backend: market data, KAP disclosures, LLM sentiment and pattern insights",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.2",
+        "ext-pdo": "*",
+        "ext-mbstring": "*",
+        "anthropic-ai/sdk": "*",
+        "guzzlehttp/guzzle": "^7.9"
+    },
+    "autoload": {
+        "psr-4": {
+            "FinSent\\": "src/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}

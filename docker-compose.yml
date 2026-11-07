@@ -1,0 +1,136 @@
+# FinSent local stack
+#   web (PHP/Apache)  http://localhost:8080   (API keys come from .env)
+#   airflow           http://localhost:8081   (admin / admin)
+#   mlflow            http://localhost:5000
+#   mysql             localhost:3307          (finsent / finsent)
+#   localstack (S3)   http://localhost:4566
+name: finsent
+
+x-common-env: &common-env
+  TZ: Europe/Istanbul
+  MYSQL_HOST: mysql
+  MYSQL_PORT: "3306"
+  MYSQL_USER: finsent
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD:-finsent}
+  MYSQL_DATABASE: finsent
+  FINSENT_LLM_PROVIDER: ${FINSENT_LLM_PROVIDER:-auto}
+  FINSENT_LLM_MODEL: ${FINSENT_LLM_MODEL:-claude-opus-5}
+  FINSENT_LLM_EFFORT: ${FINSENT_LLM_EFFORT:-low}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  XAI_API_KEY: ${XAI_API_KEY:-}
+  XAI_MODEL: ${XAI_MODEL:-grok-4.7}
+  XAI_FAST_MODEL: ${XAI_FAST_MODEL:-grok-4.20-0309-non-reasoning}
+  FINSENT_LLM_WORKERS: ${FINSENT_LLM_WORKERS:-8}
+
+services:
+  mysql:
+    image: mysql:8.0
+    mem_limit: 1536m
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_turkish_ci",
+              "--explicit-defaults-for-timestamp=1", "--innodb-buffer-pool-size=512M"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpw}
+      MYSQL_DATABASE: finsent
+      MYSQL_USER: finsent
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-finsent}
+      TZ: Europe/Istanbul
+    ports: ["3307:3306"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./backend/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-rootpw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  localstack:
+    image: localstack/localstack:3.8
+    mem_limit: 768m
+    environment:
+      SERVICES: s3
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-eu-central-1}
+    ports: ["4566:4566"]
+    volumes:
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.17.2
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts --serve-artifacts
+    ports: ["5000:5000"]
+    volumes:
+      - mlflow-data:/mlflow
+
+  web:
+    build: ./backend
+    environment:
+      <<: *common-env
+      FINSENT_RESOURCES: /var/www/resources
+    ports: ["8080:80"]
+    volumes:
+      - ./pipeline/finsent/resources:/var/www/resources:ro
+      - ./backend/public:/var/www/html/public:ro     # live UI edits without rebuilding
+      - ./backend/src:/var/www/html/src:ro
+    depends_on:
+      mysql: {condition: service_healthy}
+
+  airflow:
+    mem_limit: 5g          # a runaway job is OOM-killed inside the container instead of freezing the Docker VM
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    environment:
+      <<: *common-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqldb://finsent:${MYSQL_PASSWORD:-finsent}@mysql:3306/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__PARALLELISM: "4"
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Europe/Istanbul
+      AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Europe/Istanbul
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "30"
+      AIRFLOW_ADMIN_USER: admin
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+      # S3 (LocalStack locally; drop AWS_ENDPOINT_URL and use real credentials for AWS)
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://localstack:4566}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-eu-central-1}
+      FINSENT_S3_BUCKET: ${FINSENT_S3_BUCKET:-finsent-lake}
+      # sources
+      FINSENT_MARKET_SOURCE: ${FINSENT_MARKET_SOURCE:-auto}
+      FINSENT_MARKET_SQLITE: /data/bist_model_ready.db
+      FINSENT_MARKET_UPDATES: /opt/finsent/data/market/bist_updates.db
+      FINSENT_KAP_MODE: ${FINSENT_KAP_MODE:-live}
+      FINSENT_KAP_SAMPLE: /opt/finsent/data/samples/kap_disclosures_sample.jsonl
+      FINSENT_KAP_MAX_BODIES: ${FINSENT_KAP_MAX_BODIES:-150}
+      FINSENT_KAP_INTERVAL_S: ${FINSENT_KAP_INTERVAL_S:-3.0}
+      FINSENT_SOCIAL_TOP_N: ${FINSENT_SOCIAL_TOP_N:-10}
+      FINSENT_SOCIAL_SYMBOLS: ${FINSENT_SOCIAL_SYMBOLS:-}
+      # spark / mlflow
+      FINSENT_SPARK_TARGET: ${FINSENT_SPARK_TARGET:-local}
+      SPARK_DRIVER_MEMORY: 2g
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    ports: ["8081:8080"]
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags:ro
+      - ./data:/opt/finsent/data          # writable: Yahoo market updates land in data/market/
+      - ../bist_model_ready.db:/data/bist_model_ready.db:ro
+      - airflow-logs:/opt/airflow/logs
+    depends_on:
+      mysql: {condition: service_healthy}
+      localstack: {condition: service_healthy}
+      mlflow: {condition: service_started}
+
+volumes:
+  mysql-data:
+  localstack-data:
+  mlflow-data:
+  airflow-logs:

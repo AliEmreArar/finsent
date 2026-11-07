@@ -1,0 +1,53 @@
+{
+  "_comment": "Turkish financial-disclosure sentiment lexicon. Terms are lowercase stems matched as token prefixes (Turkish is agglutinative). Shared by the PHP backend and the Python pipeline as the offline fallback when no LLM is configured.",
+  "version": "1.0.0",
+  "positive": {
+    "artış": 1.0, "arttı": 1.0, "artır": 0.8, "yükseliş": 1.0, "yüksel": 0.8,
+    "büyüme": 1.0, "büyüdü": 1.0, "rekor": 1.4, "kâr": 1.0, "kar payı": 1.2,
+    "temettü": 1.2, "net kâr": 1.0, "kârlılık": 1.0, "olumlu": 1.0,
+    "anlaşma imzala": 1.2, "sözleşme imzala": 1.2, "yeni iş ilişkisi": 1.2,
+    "ihale kazan": 1.4, "ihaleyi kazan": 1.4, "kazandı": 1.0, "sipariş": 0.9,
+    "ihracat": 0.6, "kapasite artış": 1.2, "yatırım teşvik": 1.0, "teşvik belgesi": 1.0,
+    "pay geri alım": 1.0, "geri alım": 0.9, "bedelsiz": 1.2, "ortaklık": 0.6,
+    "işbirliği": 0.8, "stratejik": 0.5, "onaylandı": 0.6, "onay": 0.5,
+    "lisans al": 0.8, "patent": 0.8, "iyileş": 0.9, "güçlü": 0.9, "güçlen": 0.9,
+    "beklentilerin üzerinde": 1.4, "hedefin üzerinde": 1.3, "not artır": 1.3,
+    "kredi notu yükselt": 1.4, "borç azal": 1.0, "nakit akışı güçlü": 1.2,
+    "satış gelirleri art": 1.2, "favök art": 1.2, "marj geniş": 1.1,
+    "devralma": 0.6, "satın alma": 0.6, "tahsil": 0.6, "uzlaşma": 0.6, "lehine": 1.0
+  },
+  "negative": {
+    "azalış": -1.0, "azaldı": -1.0, "düşüş": -1.0, "düştü": -1.0, "geriledi": -1.0,
+    "gerileme": -1.0, "zarar": -1.3, "net zarar": -1.4, "kayıp": -1.1,
+    "olumsuz": -1.0, "dava": -0.9, "tazminat": -0.9, "ceza": -1.1, "idari para cezası": -1.3,
+    "soruşturma": -1.2, "inceleme başlat": -0.8, "iflas": -1.8, "konkordato": -1.8,
+    "haciz": -1.4, "temerrüt": -1.6, "yapılandırma": -0.6, "borç yapılandır": -0.9,
+    "işlem yasağı": -1.5, "tedbir": -0.9, "devre kesici": -0.8, "brüt takas": -1.0,
+    "iptal": -0.9, "feshedil": -1.1, "fesih": -1.1, "durdur": -0.9, "askıya": -1.0,
+    "yangın": -1.2, "kaza": -1.0, "grev": -1.0, "üretime ara": -1.1, "üretim durdu": -1.3,
+    "sermaye azalt": -0.9, "görevden ayrıl": -0.6, "istifa": -0.7,
+    "beklentilerin altında": -1.4, "hedefin altında": -1.3, "not indir": -1.3,
+    "kredi notu düşür": -1.4, "zayıf": -0.9, "zayıfla": -0.9, "daral": -1.0,
+    "marj daral": -1.1, "kur farkı zarar": -1.0, "karşılık ayır": -0.7,
+    "şüpheli alacak": -0.8, "aleyhine": -1.0, "olağanüstü kayıp": -1.3, "değer düşüklüğü": -1.0
+  },
+  "negators": ["değil", "olmayan", "olmadı", "olmamış", "yok", "olmaksızın", "edilmedi"],
+  "intensifiers": {
+    "çok": 1.3, "önemli ölçüde": 1.4, "kayda değer": 1.3, "yüzde yüz": 1.3,
+    "ciddi": 1.3, "güçlü bir": 1.2, "sert": 1.3, "tarihi": 1.3, "katına": 1.4
+  },
+  "neutral_event_types": {
+    "genel kurul": "governance", "yönetim kurulu": "governance", "esas sözleşme": "governance",
+    "sorumluluk beyanı": "regulatory", "faaliyet raporu": "financial_report",
+    "finansal rapor": "financial_report", "finansal tablo": "financial_report",
+    "kar payı": "dividend", "temettü": "dividend", "bedelsiz": "capital_increase",
+    "bedelli": "capital_increase", "sermaye artırım": "capital_increase",
+    "pay geri alım": "buyback", "geri alım": "buyback",
+    "yeni iş ilişkisi": "new_business", "sözleşme": "new_business", "ihale": "new_business",
+    "dava": "legal", "ceza": "legal", "soruşturma": "legal",
+    "kredi derecelendirme": "rating", "kredi notu": "rating",
+    "satın alma": "m_and_a", "devralma": "m_and_a", "birleşme": "m_and_a",
+    "borçlanma aracı": "debt", "tahvil": "debt", "kredi": "debt",
+    "üretim": "operations", "yatırım": "investment", "teşvik": "investment"
+  }
+}

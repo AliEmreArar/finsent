@@ -1,0 +1,24 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/vendor/
+dist/
+build/
+*.egg-info/
+spark-warehouse/
+metastore_db/
+mlruns/
+data/research/
+
+# local data (large / regenerable / third-party): keep only the synthetic sample
+data/market/
+data/models/
+*.db
+*.sqlite
+*.joblib
+*.parquet
+airflow/logs/
+.env.*
+!.env.example
