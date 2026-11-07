@@ -168,7 +168,7 @@ flowchart LR
 | Tablo | Kayıt | Aralık |
 |---|---|---|
 | `market_daily` | 2.359.058 | 1996-12-27 → 2026-11-07. 642 sembol (hisseler + enstrümanlar) |
-| `disclosures` | ~252.000 | 2021-01-04 → 2026-11-06. Geçmiş backfill tamamlandı |
+| `disclosures` | 254.119 | 2021-01-04 → 2026-11-06. Geçmiş backfill tamamlandı, boşluk taraması temiz (yalnızca bayram arifeleri düşük) |
 | `disclosure_sentiment` | xai: tüm bildirimler + lexicon | `v_sentiment` görünümü lexicon dışı sağlayıcıyı tercih eder |
 
 Diğer tablolar: `companies`, `event_returns`, `patterns`, `llm_insights`, `pipeline_runs`, `dq_reports`, `model_evaluations`, `social_sentiment`, `market_briefs`, `forecasts`, `research_results`, `alerts`, `drawings`. Şema: `backend/sql/schema.sql`.
@@ -234,6 +234,7 @@ Tamamlananlar (2026-11-08):
 - Airflow imajı yeniden derlendi; docker cp ile atılan dosyalar artık imajda.
 - Haber özellikli tahmin A/B testi yapıldı: **iyileştirme yok**, haber özellikleri eklenmedi. Olay çalışması yapıldı (`docs/forecast_research.md` → "KAP news"). Bulgu: olumlu haber aynı gün fiyatlanıyor; olumsuz haberde 20 günde −%0,5'lik gecikmeli tepki var.
 - **S3 deposu LocalStack'ten SeaweedFS'e taşındı.** LocalStack community S3'ü bellekte tutuyordu; Docker yeniden başlayınca veri gölü silinmişti ve lakehouse `PATH_NOT_FOUND` veriyordu. Docker Hub'da MinIO imajı artık yok, bu yüzden SeaweedFS seçildi (`chrislusf/seaweedfs:3.97`, kalıcı `s3-data` volume'u, kimlik bilgileri `infra/seaweedfs/s3.json`). boto3 path-style adreslemeye geçirildi (`storage.py`).
+- **Eylül 2026 boşluğu dolduruldu.** 7 Eylül – 2 Ekim 2026 arasında günde ~20 bildirim vardı. Eski S3 dedup indeksi, MySQL'de olmayan bildirimleri "görüldü" saymıştı. İndeks MySQL'den yeniden kurulunca aralık yeniden çekildi: +2.169 bildirim, hepsi Grok skorlu. Boşluk kontrolü için iş günü başına sayı, 41 günlük medyanın %40'ının altında mı diye bakıldı.
 - **Göl MySQL'den yeniden kuruldu.** Komut: `finsent rebuild-lake --start 2021-01-01 --end 2026-11-07` (`lake_rebuild.py`). Sonuç: 1.462 fiyat bölümü, 251.950 bildirim, 499.405 duygu satırı, 319.505 örüntü ve dedup indeksi. Bunun için `quality.BIST_HOLIDAYS`'e 2021–2023 tatilleri ve 8–14 Şubat 2023 deprem kapanışı eklendi.
 - Lakehouse DAG yeniden kurulan gölle tekrar çalıştırıldı (run id `lakehouse_after_s3_rebuild`).
 
