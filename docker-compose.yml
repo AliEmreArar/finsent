@@ -3,7 +3,7 @@
 #   airflow           http://localhost:8081   (admin / admin)
 #   mlflow            http://localhost:5000
 #   mysql             localhost:3307          (finsent / finsent)
-#   localstack (S3)   http://localhost:4566
+#   s3 (SeaweedFS)    http://localhost:8333   (S3 API; finsent / finsent-dev-secret)
 name: finsent
 
 x-common-env: &common-env
@@ -44,17 +44,18 @@ services:
       timeout: 5s
       retries: 30
 
-  localstack:
-    image: localstack/localstack:3.8
-    mem_limit: 768m
-    environment:
-      SERVICES: s3
-      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-eu-central-1}
-    ports: ["4566:4566"]
+  # S3-compatible object store for the data lake. SeaweedFS persists to the named volume
+  # (LocalStack community keeps S3 in memory and lost the lake on every restart).
+  s3:
+    image: chrislusf/seaweedfs:3.97
+    mem_limit: 512m
+    command: server -dir=/data -ip.bind=0.0.0.0 -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -volume.max=0
+    ports: ["8333:8333"]
     volumes:
-      - localstack-data:/var/lib/localstack
+      - s3-data:/data
+      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status && wget -q -S -O /dev/null http://127.0.0.1:8333/ 2>&1 | grep -q HTTP/"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -98,10 +99,10 @@ services:
       AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "30"
       AIRFLOW_ADMIN_USER: admin
       AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
-      # S3 (LocalStack locally; drop AWS_ENDPOINT_URL and use real credentials for AWS)
-      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://localstack:4566}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      # S3 (SeaweedFS locally; drop AWS_ENDPOINT_URL and use real credentials for AWS)
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-http://s3:8333}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-finsent}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-finsent-dev-secret}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-eu-central-1}
       FINSENT_S3_BUCKET: ${FINSENT_S3_BUCKET:-finsent-lake}
       # sources
@@ -126,11 +127,11 @@ services:
       - airflow-logs:/opt/airflow/logs
     depends_on:
       mysql: {condition: service_healthy}
-      localstack: {condition: service_healthy}
+      s3: {condition: service_healthy}
       mlflow: {condition: service_started}
 
 volumes:
   mysql-data:
-  localstack-data:
+  s3-data:
   mlflow-data:
   airflow-logs:

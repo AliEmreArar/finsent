@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "finsent",
+      "credentials": [{"accessKey": "finsent", "secretKey": "finsent-dev-secret"}],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

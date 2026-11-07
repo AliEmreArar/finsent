@@ -1,7 +1,7 @@
 """FinSent lakehouse DAG: bronze -> silver -> gold Delta tables -> MLflow evaluation.
 
 ``FINSENT_SPARK_TARGET=local`` (default) runs the PySpark jobs inside this
-container against S3/LocalStack. ``FINSENT_SPARK_TARGET=databricks`` triggers
+container against S3 (SeaweedFS locally). ``FINSENT_SPARK_TARGET=databricks`` triggers
 the ``finsent-lakehouse`` job deployed by the asset bundle in ``databricks/``
 (needs a ``databricks_default`` Airflow connection and FINSENT_DATABRICKS_JOB_ID).
 """

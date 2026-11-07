@@ -19,6 +19,15 @@ import pandas as pd
 
 # Borsa Istanbul full-day closures (official + religious holidays), 2024-2026.
 BIST_HOLIDAYS = {
+    date(2021, 1, 1), date(2021, 4, 23), date(2021, 5, 13), date(2021, 5, 14),
+    date(2021, 5, 19), date(2021, 7, 15), date(2021, 7, 20), date(2021, 7, 21),
+    date(2021, 7, 22), date(2021, 7, 23), date(2021, 8, 30), date(2021, 10, 29),
+    date(2022, 5, 2), date(2022, 5, 3), date(2022, 5, 4), date(2022, 5, 19),
+    date(2022, 7, 11), date(2022, 7, 12), date(2022, 7, 15), date(2022, 8, 30),
+    # 2023-02-08..14: market closed after the Kahramanmaraş earthquakes
+    date(2023, 2, 8), date(2023, 2, 9), date(2023, 2, 10), date(2023, 2, 13), date(2023, 2, 14),
+    date(2023, 4, 21), date(2023, 5, 1), date(2023, 5, 19), date(2023, 6, 28),
+    date(2023, 6, 29), date(2023, 6, 30), date(2023, 8, 30),
     date(2024, 1, 1), date(2024, 4, 10), date(2024, 4, 11), date(2024, 4, 12),
     date(2024, 4, 23), date(2024, 5, 1), date(2024, 6, 17), date(2024, 6, 18),
     date(2024, 6, 19), date(2024, 7, 15), date(2024, 8, 30), date(2024, 10, 29),

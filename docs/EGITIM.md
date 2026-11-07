@@ -17,7 +17,7 @@ Diyagramlar GitHub'da otomatik çizilir (Mermaid formatı).
 2. [Mimari şemalar](#2-mimari-şemalar)
 3. [Altyapı: Docker ve Docker Compose](#3-altyapı-docker-ve-docker-compose)
 4. [Veri kaynakları: Yahoo Finance, KAP, xAI Grok](#4-veri-kaynakları)
-5. [Veri gölü: S3, LocalStack, Parquet](#5-veri-gölü-s3-localstack-parquet)
+5. [Veri gölü: S3, SeaweedFS, Parquet](#5-veri-gölü-s3-seaweedfs-parquet)
 6. [Orkestrasyon: Apache Airflow](#6-orkestrasyon-apache-airflow)
 7. [Veri kalitesi ve tekilleştirme](#7-veri-kalitesi-ve-tekilleştirme)
 8. [Büyük veri: Spark, Delta Lake, Medallion, Databricks](#8-büyük-veri-spark-delta-lake-medallion-databricks)
@@ -160,7 +160,7 @@ erDiagram
 
 | Kavram | Projedeki örnek |
 |---|---|
-| `image` | `mysql:8.0`, `localstack/localstack:3.8`. Hazır imajlar kullanılıyor |
+| `image` | `mysql:8.0`, `chrislusf/seaweedfs:3.97`. Hazır imajlar kullanılıyor |
 | `build` | `airflow/Dockerfile`, `backend/Dockerfile`. Kendi imajlarımızı derliyoruz |
 | `ports` | `"8080:80"`: bilgisayarın 8080 portu, konteynerin 80 portuna gider |
 | `volumes` | `./data:/opt/finsent/data` klasör paylaşımı. `:ro` salt-okunur demek; orijinal DB böyle bağlandı ki yanlışlıkla bozulmasın |
@@ -203,11 +203,18 @@ erDiagram
 
 ---
 
-## 5. Veri gölü: S3, LocalStack, Parquet
+## 5. Veri gölü: S3, SeaweedFS, Parquet
 
 **Veri gölü (data lake) nedir?** Ham ve işlenmiş verinin, ucuz bir nesne deposunda (genelde Amazon S3) **dosya olarak** saklandığı yer. Veritabanından farkı: şema esnek, maliyet düşük, Spark gibi araçlar doğrudan okuyabilir.
 
-**LocalStack** AWS servislerini bilgisayarında taklit eder. Gerçek AWS hesabı açmadan, para ödemeden S3 kodu yazıp test edebiliriz. Kod gerçek S3'te de aynen çalışır; sadece `endpoint_url` değişir.
+**S3 uyumlu yerel depo (SeaweedFS).** Amazon S3'ün API'sini konuşan, bilgisayarında çalışan açık kaynaklı bir nesne deposu. Gerçek AWS hesabı açmadan, para ödemeden S3 kodu yazıp test edebiliriz. Kod gerçek S3'te de aynen çalışır; sadece `endpoint_url` ve anahtarlar değişir.
+
+> 💡 **Öğrenme notu (yaşanmış hata):** İlk sürümde **LocalStack** kullandık. LocalStack AWS'yi taklit eden popüler bir araç, ama ücretsiz sürümü S3 verisini **bellekte** tutuyor; diske kalıcı yazma Pro sürümde. Docker yeniden başlayınca veri gölünün tamamı silindi ve Spark işi "yol bulunamadı" hatası verdi. İki ders çıkardık:
+>
+> - **Bir aracın varsayılan davranışını doğrula.** Volume bağlamak, verinin kalıcı olduğu anlamına gelmez.
+> - **Doğruluk kaynağını (source of truth) bil.** Veri MySQL'de sağlam duruyordu. `finsent rebuild-lake` komutu gölü MySQL'den ve fiyat kaynaklarından aynı düzen ve şemayla yeniden kurar.
+>
+> MinIO'yu da denedik, ama 2025'ten beri Docker Hub'da hazır imajı yok. Sonunda kalıcı ve açık kaynaklı SeaweedFS'e geçtik.
 
 **Klasör düzeni (bucket `finsent-lake`):**
 
@@ -642,7 +649,7 @@ sequenceDiagram
 
 1. Airflow arayüzünde `finsent_ingest` DAG'ını aç, Graph görünümünde görevleri incele, bir görevin loglarını oku.
 2. `jobs.py` → `ingest_disclosures` ve `dedup.py`'yi oku.
-3. LocalStack'teki dosyaları listele: `aws --endpoint-url http://localhost:4566 s3 ls s3://finsent-lake --recursive`.
+3. S3'teki dosyaları listele: `AWS_ACCESS_KEY_ID=finsent AWS_SECRET_ACCESS_KEY=finsent-dev-secret aws --endpoint-url http://localhost:8333 s3 ls s3://finsent-lake --recursive`.
 4. ✍️ **Alıştırma:** `quality.py`'ye "hacim sıfır olan gün sayısı" kontrolü ekle.
 
 **3. hafta: Spark ve Delta**

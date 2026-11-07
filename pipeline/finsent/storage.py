@@ -1,4 +1,4 @@
-"""S3 data-lake helpers (works against AWS S3 or LocalStack via AWS_ENDPOINT_URL).
+"""S3 data-lake helpers (works against AWS S3 or any S3-compatible store (SeaweedFS locally) via AWS_ENDPOINT_URL).
 
 Lake layout::
 
@@ -28,8 +28,12 @@ class Lake:
 
         self.settings = settings
         self.bucket = settings.s3_bucket
+        from botocore.config import Config
+
+        # custom endpoints (SeaweedFS, MinIO, LocalStack) are addressed path-style: http://host:9000/bucket/key
+        cfg = Config(s3={"addressing_style": "path"}) if settings.s3_endpoint_url else None
         self.s3 = client or boto3.client(
-            "s3", endpoint_url=settings.s3_endpoint_url, region_name=settings.aws_region
+            "s3", endpoint_url=settings.s3_endpoint_url, region_name=settings.aws_region, config=cfg
         )
 
     # --- bucket -------------------------------------------------------------

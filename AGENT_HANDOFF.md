@@ -14,7 +14,7 @@ FinSent, Borsa İstanbul (BIST) hisseleri için bir **finansal duygu ve örünt�
 - **Duygu puanlama:** bildirimleri xAI Grok LLM'iyle olumlu/olumsuz/nötr olarak puanlar.
 - **Örüntü tespiti:** teknik örüntüleri yakalar (kırılım, hacim patlaması, RSI vb.).
 - **Tahmin:** hisseler için kalibre edilmiş yön olasılıkları, altın için fiyat aralığı üretir.
-- **Veri gölü ve hat:** her şeyi Airflow ile S3 veri gölüne (LocalStack) ve Delta Lake katmanlarına (bronze/silver/gold, PySpark) taşır. ML deneylerini MLflow'a kaydeder.
+- **Veri gölü ve hat:** her şeyi Airflow ile S3 veri gölüne (SeaweedFS, S3 uyumlu) ve Delta Lake katmanlarına (bronze/silver/gold, PySpark) taşır. ML deneylerini MLflow'a kaydeder.
 - **Arayüz:** PHP + MySQL backend üzerinde koyu temalı bir arayüz sunar. İçinde sağda, araç kullanan bir **Grok ajan paneli**, çizim araçları ve alarmlar vardır.
 
 Proje başlangıçta bir CV proje tanımından yola çıktı. Kullanıcı Türkçe konuşur, **yanıtlar Türkçe olmalıdır**.
@@ -48,7 +48,7 @@ docker compose up -d --build
 | Airflow | http://localhost:8081 | admin / admin. `standalone` modu, LocalExecutor, metadata DB MySQL'de |
 | MLflow | http://localhost:5000 | Deneyler: `finsent-forecast`, `finsent-forecast-research`, `finsent-gold-forecast`, sentiment benchmark |
 | MySQL | localhost:3307 | DB `finsent`. Şifreler `.env` içinde |
-| LocalStack S3 | http://localhost:4566 | Bucket `finsent-lake` |
+| S3 (SeaweedFS) | http://localhost:8333 | Bucket `finsent-lake`, anahtarlar `finsent` / `finsent-dev-secret` (`infra/seaweedfs/s3.json`) |
 
 **Bellek:** Docker Desktop (WSL2) ~8 GB. `mem_limit` değerleri: airflow 5g, mysql 1536m. Hisse tahmin modelinin yeniden eğitimi ~3 GB kullanır. Eskiden VM'i kilitliyordu, çözümü slim float32 frame ve joblib kaydıydı. VM kilitlenirse: `wsl --shutdown` ve Docker Desktop'ı yeniden başlatın.
 
@@ -87,7 +87,7 @@ flowchart LR
     A11[collect_intraday]
     A6 --> A12[trigger finsent_lakehouse]
   end
-  subgraph Lake["S3 veri gölü (LocalStack)"]
+  subgraph Lake["S3 veri gölü (SeaweedFS)"]
     R[raw/market, raw/kap]
     C[curated/sentiment, curated/patterns]
     Q[quality/ raporlar]
@@ -116,7 +116,7 @@ flowchart LR
 
 | Yol | İçerik |
 |---|---|
-| `docker-compose.yml` | mysql, localstack, mlflow, web, airflow |
+| `docker-compose.yml` | mysql, s3 (SeaweedFS), mlflow, web, airflow |
 | `pipeline/finsent/` | Python paketi: veri toplama, temizlik, duygu, örüntü, tahmin |
 | `pipeline/tests/` | pytest (moto ile S3 mock'u) |
 | `airflow/dags/` | `finsent_ingest.py` (günlük), `finsent_lakehouse.py` (tetiklenen Spark işi) |
@@ -150,7 +150,8 @@ flowchart LR
 | `instruments.py` | XAUUSD, XAGUSD, USDTRY, EURTRY, XU100. Türetilmiş ALTIN/GUMUS = ons × USDTRY ÷ 31,1035. `market_daily`'ye `source='instrument'` olarak yazılır |
 | `intraday.py` | 1m/5m/15m çubuklar → `data/market/intraday.db` |
 | `rescore.py` | xai skoru olmayan tüm geçmiş bildirimleri toplu Grok ile puanlar |
-| `cli.py` | `finsent run`, `analyze`, `patterns`, `reset-disclosures`, `backfill-kap` (`--retry-from-log`, 429'da 300 sn bekleme, 4 deneme, 6 sn aralık) |
+| `lake_rebuild.py` | S3 gölünü MySQL + fiyat kaynaklarından aynı düzen ve şemayla yeniden yazar (`finsent rebuild-lake`) |
+| `cli.py` | `finsent run`, `analyze`, `patterns`, `reset-disclosures`, `rebuild-lake`, `backfill-kap` (`--retry-from-log`, 429'da 300 sn bekleme, 4 deneme, 6 sn aralık) |
 
 ### Grok kullanımı (`sentiment/grok.py`)
 
@@ -232,7 +233,9 @@ Tamamlananlar (2026-11-08):
 - Rescore bitti: tüm bildirimler (~252 bin, 2021-01-04 → bugün) Grok skorlu.
 - Airflow imajı yeniden derlendi; docker cp ile atılan dosyalar artık imajda.
 - Haber özellikli tahmin A/B testi yapıldı: **iyileştirme yok**, haber özellikleri eklenmedi. Olay çalışması yapıldı (`docs/forecast_research.md` → "KAP news"). Bulgu: olumlu haber aynı gün fiyatlanıyor; olumsuz haberde 20 günde −%0,5'lik gecikmeli tepki var.
-- Lakehouse DAG yeni KAP geçmişiyle yeniden tetiklendi (`manual__2026-11-07T21:31:56`).
+- **S3 deposu LocalStack'ten SeaweedFS'e taşındı.** LocalStack community S3'ü bellekte tutuyordu; Docker yeniden başlayınca veri gölü silinmişti ve lakehouse `PATH_NOT_FOUND` veriyordu. Docker Hub'da MinIO imajı artık yok, bu yüzden SeaweedFS seçildi (`chrislusf/seaweedfs:3.97`, kalıcı `s3-data` volume'u, kimlik bilgileri `infra/seaweedfs/s3.json`). boto3 path-style adreslemeye geçirildi (`storage.py`).
+- **Göl MySQL'den yeniden kuruldu.** Komut: `finsent rebuild-lake --start 2021-01-01 --end 2026-11-07` (`lake_rebuild.py`). Sonuç: 1.462 fiyat bölümü, 251.950 bildirim, 499.405 duygu satırı, 319.505 örüntü ve dedup indeksi. Bunun için `quality.BIST_HOLIDAYS`'e 2021–2023 tatilleri ve 8–14 Şubat 2023 deprem kapanışı eklendi.
+- Lakehouse DAG yeniden kurulan gölle tekrar çalıştırıldı (run id `lakehouse_after_s3_rebuild`).
 
 Açık kalanlar:
 
@@ -280,6 +283,7 @@ Açık kalanlar:
 - **Parquet şema uyuşmazlığı:** null tipli `key_points` ve INT32 `market_cap_try` sorun çıkardı. Çözüm: pyarrow şemaları sabitlendi.
 - **Sızıntı:** gold katmanında aynı gün teknik özellikler AUC'yi 0,68'e şişiriyordu. Özellikler bir gün geciktirilince AUC 0,58'e indi.
 - **content_hash çakışması:** rutin günlük bildirimlerde FK hatası çıkıyordu. Çözüm: hash'e gün eklendi ve `load_serving_db`'ye çakışma koruması kondu.
+- **S3 verisi kayboldu:** LocalStack community kalıcı değil. SeaweedFS'e geçildi. Göl kaybolursa `finsent rebuild-lake` kullanılır; doğruluk kaynağı MySQL'dir.
 - **Gürültü bildirimleri:** raw'dan tekrar giriyordu. Çözüm: `_read_raw_disclosures` ve `extract_disclosures` içinde filtre.
 - **KAP gövde metni:** RSC payload içeriyordu. Regex ile temizlendi, 702 satır düzeltildi.
 - **USD dönüşümü:** döngü değişkeni çakışması vardı; ayrıca yavaştı (6,5 sn). Şimdi kur, sembolün kendi satırlarından okunuyor.

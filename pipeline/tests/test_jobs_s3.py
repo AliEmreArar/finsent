@@ -76,3 +76,33 @@ def test_market_dq_failure_blocks_write(settings):
         with pytest.raises(jobs.DataQualityError):
             jobs.ingest_market(settings, start, end, "bad")
     assert not Lake(settings).list_keys("raw/market/")
+
+
+@mock_aws
+def test_rebuild_lake_from_serving_db(settings):
+    """rebuild-lake rewrites raw KAP, curated sentiment and the dedup index from MySQL rows."""
+    import pandas as pd
+
+    from finsent import kap, lake_rebuild
+
+    disc = pd.DataFrame([{c: None for c in kap.DISCLOSURE_COLUMNS} | {
+        "disclosure_id": f"d{i}", "disclosure_index": i, "symbol": "THYAO", "subject": "Özel Durum Açıklaması",
+        "published_at": pd.Timestamp(2025, 1, 6 + i, 10), "source": "kap", "content_hash": f"h{i}"} for i in range(3)])
+    sent = pd.DataFrame([{"disclosure_id": f"d{i}", "label": "positive", "score": 0.5, "confidence": 0.9,
+                          "event_type": "other", "key_points": '["a"]' if i else None, "rationale": "r",
+                          "provider": "xai", "model": "grok", "published_date": date(2025, 1, 6 + i)} for i in range(3)])
+
+    def fake_query(_s, sql, _args):
+        if "FROM disclosure_sentiment" in sql:
+            return sent
+        if sql.startswith("SELECT disclosure_id, content_hash"):
+            return disc[["disclosure_id", "content_hash"]]
+        return disc
+
+    with mock.patch.object(lake_rebuild, "_query", side_effect=fake_query):
+        out = lake_rebuild.rebuild(settings, date(2025, 1, 1), date(2025, 1, 31), parts=("kap", "index"))
+    assert out == {"disclosures": 3, "sentiment_rows": 3, "dedup_index_ids": 3}
+    lake = Lake(settings)
+    assert len(jobs._read_raw_disclosures(lake, date(2025, 1, 6), date(2025, 1, 8))) == 3
+    assert lake.get_json("state/kap_dedup_index.json")["hashes"]["h2"] == "d2"
+    assert len(lake.list_keys("curated/sentiment/")) == 3

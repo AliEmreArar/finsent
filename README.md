@@ -47,7 +47,7 @@ docker compose up -d --build
 | Airflow | http://localhost:8081 (`admin` / `admin`) |
 | MLflow | http://localhost:5000 |
 | MySQL | `localhost:3307`, `finsent` / `finsent` |
-| LocalStack S3 | http://localhost:4566, bucket `finsent-lake` |
+| S3 (SeaweedFS) | http://localhost:8333, bucket `finsent-lake`, keys `finsent` / `finsent-dev-secret`. Persistent S3-compatible store; `finsent rebuild-lake --start … --end …` rewrites the lake from MySQL if it is ever lost |
 
 Run a backfill by triggering the ingestion DAG with a window. It triggers the lakehouse DAG when it finishes:
 

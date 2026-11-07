@@ -121,8 +121,18 @@ def main(argv: list[str] | None = None) -> None:
     bk.add_argument("--scorer", default="lexicon", choices=["lexicon", "xai", "anthropic"])
     bk.add_argument("--retry-from-log", help="first re-run the windows a previous backfill log reported as failed")
 
+    lk = sub.add_parser("rebuild-lake", help="rewrite the S3 lake from MySQL + market sources (after losing the object store)")
+    lk.add_argument("--start", type=_d, required=True)
+    lk.add_argument("--end", type=_d, required=True)
+    lk.add_argument("--parts", default="market,kap,patterns,index", help="comma list: market,kap,patterns,index")
+
     args = ap.parse_args(argv)
     settings = get_settings()
+
+    if args.cmd == "rebuild-lake":
+        from .lake_rebuild import rebuild
+        print(json.dumps(rebuild(settings, args.start, args.end, parts=tuple(args.parts.split(","))), indent=2))
+        return
 
     if args.cmd == "backfill-kap":
         import re

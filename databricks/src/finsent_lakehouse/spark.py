@@ -29,7 +29,7 @@ def get_spark(app: str = "finsent") -> SparkSession:
                 "com.amazonaws.auth.EnvironmentVariableCredentialsProvider")
         .config("spark.ui.showConsoleProgress", "false")
     )
-    if endpoint:  # LocalStack / MinIO
+    if endpoint:  # SeaweedFS / MinIO / LocalStack
         builder = (
             builder.config("spark.hadoop.fs.s3a.endpoint", endpoint)
             .config("spark.hadoop.fs.s3a.path.style.access", "true")
