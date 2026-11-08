@@ -646,6 +646,28 @@ sequenceDiagram
 
 ---
 
+### 17.1 FinSent'i başka bir sisteme bağlamak: Jarvis
+
+FinSent'in verisi sadece bu bilgisayarda, Docker içindeki MySQL'de durur. Bilgisayar kapalıyken telefondaki
+sesli asistan (Jarvis) bu veriye ulaşamaz. Çözüm **push (itme) modeli**: her günlük çalışmanın sonunda
+`jarvis_push` görevi verinin küçük bir özetini buluttaki Jarvis'e gönderir. Jarvis soruları bu kopyadan cevaplar
+ve verinin tarihini söyler.
+
+```mermaid
+flowchart LR
+  DAG[finsent_ingest DAG] --> JP[jarvis_push görevi]
+  JP -- genel özet ~14 KB --> W[Jarvis Worker /finsent/snapshot]
+  JP -- 100'lük hisse parçaları --> S[Jarvis Worker /finsent/stocks]
+  W & S --> D1[(Cloudflare D1)]
+  T[iPhone: "THYAO ne durumda?"] --> A[Jarvis ajanı] --> D1
+```
+
+Öğrenilecek fikirler:
+
+- **Pull ve push:** Jarvis FinSent'e bağlanmaya çalışsaydı (pull), bilgisayarın açık ve internete açık olması gerekirdi. Push'ta veri sahibi gönderir; alıcı her zaman açıktır.
+- **Parçalama:** Ücretsiz bulut planlarında istek başına CPU süresi kısıtlıdır. 730 KB'lık tek JSON yerine hisse başına satır saklanır; her soru sadece küçük bir satır okur.
+- **`trigger_rule=all_done`:** Önceki görevlerden biri atlansa ya da hata verse bile gönderim yine çalışır. Ellerindeki en güncel veri gider.
+
 ## 18. Güvenlik ve iyi pratikler
 
 | Pratik | Projede |

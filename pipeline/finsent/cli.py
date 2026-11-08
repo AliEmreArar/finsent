@@ -135,9 +135,15 @@ def main(argv: list[str] | None = None) -> None:
     sd.add_argument("--no-lake", action="store_true", help="skip rebuilding the S3 lake")
     sd.add_argument("--keep-downloads", action="store_true")
 
+    sub.add_parser("jarvis-push", help="upload a compact snapshot to the Jarvis assistant (JARVIS_URL/JARVIS_TOKEN)")
+
     args = ap.parse_args(argv)
     settings = get_settings()
 
+    if args.cmd == "jarvis-push":
+        from .jarvis_push import push
+        print(json.dumps(push(settings), indent=2, default=str))
+        return
     if args.cmd == "export-snapshot":
         from .snapshot import export
         print(json.dumps(export(settings, Path(args.out)), indent=2))

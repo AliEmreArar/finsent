@@ -181,6 +181,14 @@ def finsent_ingest():
 
         return intraday.collect(get_settings())
 
+    @task(retries=2, trigger_rule="all_done")
+    def jarvis_push() -> dict:
+        # runs after the day's outputs even if a Grok-search step was skipped or failed
+        from finsent import jarvis_push as jp
+        from finsent.config import get_settings
+
+        return jp.push(get_settings())
+
     @task.short_circuit
     def lakehouse_enabled(**context) -> bool:
         return bool(context["params"].get("trigger_lakehouse", True))
@@ -199,11 +207,15 @@ def finsent_ingest():
         wait_for_completion=False,
     )
     loaded >> lakehouse_enabled() >> trigger
-    loaded >> direction_forecast(win)
+    fc = direction_forecast(win)
+    loaded >> fc
     win >> collect_intraday()
-    win >> refresh_instruments() >> gold_forecast(win)
+    gfc = gold_forecast(win)
+    win >> refresh_instruments() >> gfc
     gate = grok_search_enabled(win)
-    loaded >> gate >> [social_sentiment(win), market_brief(win)]
+    soc, brief = social_sentiment(win), market_brief(win)
+    loaded >> gate >> [soc, brief]
+    [fc, gfc, soc, brief] >> jarvis_push()
 
 
 finsent_ingest()

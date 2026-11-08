@@ -21,6 +21,8 @@ x-common-env: &common-env
   XAI_MODEL: ${XAI_MODEL:-grok-4.7}
   XAI_FAST_MODEL: ${XAI_FAST_MODEL:-grok-4.20-0309-non-reasoning}
   FINSENT_LLM_WORKERS: ${FINSENT_LLM_WORKERS:-8}
+  JARVIS_URL: ${JARVIS_URL:-}
+  JARVIS_TOKEN: ${JARVIS_TOKEN:-}
 
 services:
   mysql:

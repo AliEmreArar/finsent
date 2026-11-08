@@ -1,7 +1,7 @@
 # FinSent: agent devir dosyası (handoff)
 
 > Bu dosya, projeyi devralacak bir yapay zekâ ajanı ya da geliştirici için yazıldı. Projede ne var, neler yapıldı, neler denendi ve tutmadı, açık işler neler ve nelere dokunulmamalı, hepsi burada.
-> Son güncelleme: 2026-11-08.
+> Son güncelleme: 2026-11-08 (Jarvis entegrasyonu).
 > Kavramların açıklamalı eğitim versiyonu [docs/EGITIM.md](docs/EGITIM.md) dosyasındadır.
 
 ---
@@ -248,6 +248,8 @@ Tamamlananlar (2026-11-08):
 - **Eylül 2026 boşluğu dolduruldu.** 7 Eylül – 2 Ekim 2026 arasında günde ~20 bildirim vardı. Eski S3 dedup indeksi, MySQL'de olmayan bildirimleri "görüldü" saymıştı. İndeks MySQL'den yeniden kurulunca aralık yeniden çekildi: +2.169 bildirim, hepsi Grok skorlu. Boşluk kontrolü için iş günü başına sayı, 41 günlük medyanın %40'ının altında mı diye bakıldı.
 - **Göl MySQL'den yeniden kuruldu.** Komut: `finsent rebuild-lake --start 2021-01-01 --end 2026-11-07` (`lake_rebuild.py`). Sonuç: 1.462 fiyat bölümü, 251.950 bildirim, 499.405 duygu satırı, 319.505 örüntü ve dedup indeksi. Bunun için `quality.BIST_HOLIDAYS`'e 2021–2023 tatilleri ve 8–14 Şubat 2023 deprem kapanışı eklendi.
 - Lakehouse DAG yeniden kurulan gölle tekrar çalıştırıldı (run id `lakehouse_after_s3_rebuild`).
+
+- **Jarvis entegrasyonu (2026-11-08):** `pipeline/finsent/jarvis_push.py` + `finsent jarvis-push` komutu. Günlük DAG'ın sonunda `jarvis_push` görevi (`trigger_rule=all_done`; tahmin, altın, sosyal duygu ve brief'ten sonra) çalışır. Bu görev, kullanıcının bulutta çalışan sesli asistanı Jarvis'e (ayrı repo `AliEmreArar/jarvis`, Cloudflare Worker) özet veri yükler. Genel özet (`/finsent/snapshot`, ~14 KB) piyasa, enstrümanlar, genişlik, en çok yükselen/düşenler, brief, altın aralıkları, önemli KAP bildirimleri ve 5 günlük model sıralamasını içerir. Hisse başına satırlar (`/finsent/stocks`, 100'lük parçalar, ~628 hisse) fiyat, teknikler, tahmin olasılıkları, X duygu analizi ve son KAP bildirimlerini içerir. `.env` içinde `JARVIS_URL` / `JARVIS_TOKEN` yoksa görev atlanır (token gizlidir, yazdırılmaz). Airflow imajı bu modülle yeniden derlendi.
 
 Açık kalanlar:
 
