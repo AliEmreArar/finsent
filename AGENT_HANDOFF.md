@@ -370,4 +370,6 @@ Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir 
 - Risk tabanlı büyüklük: `ctx.buy(sym, { riskPercent: 1, stopLoss: 0.05 })` stop olursa sermayenin %1'ini kaybettirecek büyüklükte alır (nakitle sınırlı).
 - Push 403 verdiği için kullanıcıya `finsent-strateji-lab.bundle` (git bundle) gönderildi; GitHub erişimi düzelince commit'ler doğrudan push'lanmalı.
 
+- Otomatik düzeltme: Grok'un ürettiği kod derlenmez veya ilk backtest'te çalışma hatası verirse hata mesajıyla `/api/strategy/fix` **bir kez** otomatik çağrılır, sonra test yeniden çalışır (sohbette "Kod hata verdi, Grok otomatik düzeltti" görünür). Zaman aşımı (sonsuz döngü) otomatik düzeltilmez. Sahte xAI sunucusuyla uçtan uca test edildi.
+
 **Açık fikirler:** gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).

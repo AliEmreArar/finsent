@@ -168,7 +168,7 @@
     $('#lab-ask').onsubmit = (e) => { e.preventDefault(); generate(); };
     $('#lab-prompt').onkeydown = (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); generate(); } };
     $('#lab-check').onclick = () => inspect(true);
-    $('#lab-fix').onclick = fixWithGrok;
+    $('#lab-fix').onclick = () => fixWithGrok(false);
     $('#lab-copy').onclick = () => { navigator.clipboard?.writeText(getCode()); toast('Kod kopyalandı'); };
     $('#lab-help-btn').onclick = toggleHelp;
     $('#lab-export').onclick = exportStrategy;
@@ -368,20 +368,33 @@
     saveDraft();
     renderChat();
     btn.disabled = false;
-    const ok = await inspect(false);
-    if (ok) runBacktest();
+    let ok = await inspect(false);
+    if (!ok && out.provider === 'xai') ok = await fixWithGrok(true);
+    if (ok) {
+      const err = await runBacktest();
+      if (err && err.phase && err.phase !== 'timeout' && out.provider === 'xai' && await fixWithGrok(true)) await runBacktest();
+    }
   }
 
-  async function fixWithGrok() {
+  // auto = called right after generation: no backtest here (the caller runs it), returns success
+  async function fixWithGrok(auto = false) {
     const btn = $('#lab-fix'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Düzeltiliyor';
+    let ok = false;
+    if (auto) { S.chat.push({ role: 'assistant', pending: true }); renderChat(); }
     try {
       const out = await api('/strategy/fix', { method: 'POST', body: JSON.stringify({ code: getCode(), error: S.lastError || '' }) });
+      if (auto) S.chat.pop();
       setCode(out.code);
-      S.chat.push({ role: 'assistant', name: 'Kod düzeltildi', summary: out.summary, assumptions: [], warnings: out.warnings || [], provider: 'xai' });
+      S.chat.push({ role: 'assistant', name: auto ? 'Kod hata verdi, Grok otomatik düzeltti' : 'Kod düzeltildi', summary: out.summary, assumptions: [], warnings: out.warnings || [], provider: 'xai' });
       renderChat(); saveDraft();
-      if (await inspect(false)) runBacktest();
-    } catch (e) { toast(e.message); }
+      ok = await inspect(false);
+      if (ok && !auto) runBacktest();
+    } catch (e) {
+      if (auto) { S.chat.pop(); renderChat(); }
+      toast(e.message);
+    }
     btn.disabled = false; btn.textContent = 'Grok ile düzelt';
+    return ok;
   }
 
   // ------------------------------------------------------------------ settings
@@ -537,8 +550,11 @@
       st.textContent = '';
       if (e.phase || e.line) showError(e); else toast(e.message);
       if (e.phase) $('#lab-err').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      btn.disabled = false;
+      return e;
     }
     btn.disabled = false;
+    return null;
   }
 
   // ------------------------------------------------------------------ results
