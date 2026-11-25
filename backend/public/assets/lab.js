@@ -58,7 +58,7 @@
     id: null, name: TEMPLATES[0]?.name || 'Yeni strateji', prompt: '', code: TEMPLATES[0]?.code || '',
     chat: [],
     config: { symbols: TEMPLATES[0]?.symbols || ['THYAO'], from: yearsAgo(5), to: today, initialCapital: 100000,
-      commissionBps: 10, slippageBps: 5, fill: 'next_open', currency: 'TRY', benchmark: 'XU100', adjustCorporateActions: true, cashRatePct: 0, params: {} },
+      commissionBps: 10, slippageBps: 5, fill: 'next_open', currency: 'TRY', benchmark: 'XU100', adjustCorporateActions: true, cashRatePct: 0, timeframe: '1d', params: {} },
   });
   let S = defaultState();
   let meta = null;          // inspected strategy {name, description, params}
@@ -137,6 +137,7 @@
           <div class="lab-field"><label>Sanal sermaye</label><input type="number" class="field" id="lab-cap" min="1000" step="1000"></div>
           <div class="lab-field"><label>Komisyon (binde, tek yön)</label><input type="number" class="field" id="lab-comm" min="0" max="100" step="0.5"><span class="muted small" id="lab-comm-pct"></span></div>
           <div class="lab-field"><label>Kayma (binde)</label><input type="number" class="field" id="lab-slip" min="0" max="100" step="0.5"></div>
+          <div class="lab-field"><label>Zaman dilimi</label><div class="seg" id="lab-tf"><button data-v="1d">Günlük</button><button data-v="1w">Haftalık</button><button data-v="1mo">Aylık</button></div></div>
           <div class="lab-field"><label>İşlem fiyatı</label><div class="seg" id="lab-fill"><button data-v="next_open">Ertesi açılış</button><button data-v="close">Sinyal kapanışı</button></div></div>
           <div class="lab-field"><label>Para birimi</label><div class="seg" id="lab-cur"><button data-v="TRY">TL</button><button data-v="USD">USD</button></div></div>
           <div class="lab-field"><label>Nakit faizi (yıllık %)</label><input type="number" class="field" id="lab-rate" min="0" max="200" step="1">
@@ -363,6 +364,7 @@
     if (out.code) { setCode(out.code); S.config.params = {}; }
     if (out.name) { S.name = out.name; $('#lab-name').value = out.name; }
     if (out.symbols?.length) { S.config.symbols = out.symbols.slice(0, status.max_symbols || 40); renderSymbols(); }
+    if (out.timeframe && out.timeframe !== (S.config.timeframe || '1d')) { S.config.timeframe = out.timeframe; bindSettings(); }
     saveDraft();
     renderChat();
     btn.disabled = false;
@@ -391,7 +393,7 @@
     const commPct = () => { $('#lab-comm-pct').textContent = `= %${num(c.commissionBps / 100, 2)} her alım ve satımda`; };
     commPct();
     const segSet = (id, val) => $$(`#${id} button`).forEach((b) => b.classList.toggle('on', b.dataset.v === val));
-    segSet('lab-fill', c.fill); segSet('lab-cur', c.currency);
+    segSet('lab-fill', c.fill); segSet('lab-cur', c.currency); segSet('lab-tf', c.timeframe || '1d');
     const upd = () => saveDraft();
     $('#lab-from').onchange = (e) => { c.from = e.target.value; markRange(); upd(); };
     $('#lab-to').onchange = (e) => { c.to = e.target.value; markRange(); upd(); };
@@ -403,6 +405,7 @@
     $('#lab-adj').onchange = (e) => { c.adjustCorporateActions = e.target.checked; upd(); };
     $$('#lab-fill button').forEach((b) => (b.onclick = () => { c.fill = b.dataset.v; segSet('lab-fill', c.fill); upd(); }));
     $$('#lab-cur button').forEach((b) => (b.onclick = () => { c.currency = b.dataset.v; segSet('lab-cur', c.currency); upd(); }));
+    $$('#lab-tf button').forEach((b) => (b.onclick = () => { c.timeframe = b.dataset.v; segSet('lab-tf', c.timeframe); upd(); }));
     $$('#lab-range button').forEach((b) => (b.onclick = () => {
       const y = Number(b.dataset.y);
       c.to = today; c.from = y >= 99 ? '1997-01-01' : yearsAgo(y);
@@ -500,9 +503,10 @@
   // ------------------------------------------------------------------ data + run
   async function loadData(c = S.config) {
     if (!c.symbols.length) throw new Error('En az bir sembol ekle.');
-    const key = [c.symbols.join(','), c.from, c.to, c.currency, c.benchmark].join('|');
+    const warm = { '1w': 1800, '1mo': 4500 }[c.timeframe] || 420;
+    const key = [c.symbols.join(','), c.from, c.to, c.currency, c.benchmark, warm].join('|');
     if (dataCache.has(key)) return dataCache.get(key);
-    const q = new URLSearchParams({ symbols: c.symbols.join(','), from: c.from, to: c.to, currency: c.currency, benchmark: c.benchmark });
+    const q = new URLSearchParams({ symbols: c.symbols.join(','), from: c.from, to: c.to, currency: c.currency, benchmark: c.benchmark, warmup_days: warm });
     const d = await api(`/strategy/data?${q}`);
     if (dataCache.size > 6) dataCache.delete(dataCache.keys().next().value);
     dataCache.set(key, d);
@@ -511,7 +515,7 @@
 
   function engineConfig(data, c = S.config) {
     return { initialCapital: c.initialCapital, commissionBps: c.commissionBps, slippageBps: c.slippageBps, fill: c.fill,
-      adjustCorporateActions: c.adjustCorporateActions, startDate: data.from, cashRatePct: c.currency === 'TRY' ? (c.cashRatePct || 0) : 0 };
+      adjustCorporateActions: c.adjustCorporateActions, startDate: data.from, timeframe: c.timeframe || '1d', cashRatePct: c.currency === 'TRY' ? (c.cashRatePct || 0) : 0 };
   }
 
   async function runBacktest() {
@@ -526,7 +530,7 @@
       showError(null);
       lastResult = res;
       if (data.missing?.length) res.warnings.unshift(`Verisi olmayan semboller atlandı: ${data.missing.join(', ')}`);
-      st.textContent = `${num(res.dates.length, 0)} gün · ${num(res.elapsedMs, 0)} ms`;
+      st.textContent = `${num(res.dates.length, 0)} ${{ '1w': 'haftalık', '1mo': 'aylık' }[S.config.timeframe] ? `${{ '1w': 'haftalık', '1mo': 'aylık' }[S.config.timeframe]} mum` : 'gün'} · ${num(res.elapsedMs, 0)} ms`;
       renderResults(res, data);
       saveDraft();
     } catch (e) {
@@ -547,7 +551,7 @@
     const out = $('#lab-results');
     out.innerHTML = `
       <div class="card reveal">
-        <div class="card-head"><h2><span class="stepn">4</span>Sonuçlar <span class="muted small" style="font-weight:400">· ${esc(S.name)} · ${fdate(r.dates[0])} – ${fdate(r.dates.at(-1))} · ${r.symbols.length} varlık</span></h2>
+        <div class="card-head"><h2><span class="stepn">4</span>Sonuçlar <span class="muted small" style="font-weight:400">· ${esc(S.name)} · ${fdate(r.dates[0])} – ${fdate(r.dates.at(-1))} · ${r.symbols.length} varlık${S.config.timeframe === '1w' ? ' · haftalık' : S.config.timeframe === '1mo' ? ' · aylık' : ''}</span></h2>
           <div class="toolbar" style="margin:0;gap:6px"><button class="btn sm" id="lab-review"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg>Grok yorumlasın</button>
           <button class="btn sm" id="lab-csv">İşlemleri indir (CSV)</button></div></div>
         ${r.warnings.length ? `<div class="lab-warn">${r.warnings.map((w) => `<div>! ${esc(w)}</div>`).join('')}</div>` : ''}

@@ -36,7 +36,7 @@
 
   const RULES = [
     { id: 'momentum_rotation', re: /(rotasyon|en güçlü|en çok (yükselen|kazandıran)|momentum.*(ilk|en iyi)|(ilk|en iyi) \d+ hisse)/ },
-    { id: 'kap_sentiment', re: /\b(kap|haber|bildirim|duygu|sentiment|olumlu)/ },
+    { id: 'kap_sentiment', re: /(\bkap\b|\bkap'|haber|bildirim|duygu|sentiment|olumlu)/ },
     { id: 'dca', re: /(her ay|aylık al|düzenli (al|birikim)|birikim|dca)/ },
     { id: 'buy_hold', re: /(al[- ]ve[- ]tut|al[- ]tut|buy and hold)/ },
     { id: 'macd_trend', re: /\bmacd\b/ },
@@ -67,7 +67,7 @@
       set('buyBelow', grab(t, [/rsi[^.,;]*?(\d+(?:[.,]\d+)?)\s*['’]?\s*(?:\w+\s)?(?:altı|altına|altında|aşağı|den düşük|dan düşük|in altına|un altına|ün altına|ın altına)/, /(\d+)\s*['’]?\s*\w*\s*alt[ıi]na?\s*(?:in|düş)/, /(\d+)\s*(?:altı|altına|altında)/]));
       set('sellAbove', grab(t, [/(\d+(?:[.,]\d+)?)\s*['’]?\s*\w*\s*(?:üstü|üstüne|üstünde|üzeri|üzerine|üzerinde|yukarı|geçince|aşınca)/]));
     } else if (rule.id === 'sma_cross') {
-      const nums = [...t.matchAll(/(\d+)\s*(?:günlük|gün|'lük|’lük|lik|lük|luk)/g)].map((m) => toNum(m[1])).filter((n) => n >= 2 && n <= 400);
+      const nums = [...t.matchAll(/(\d+)\s*(?:günlük|gün|haftalık|hafta|aylık|'lük|’lük|'lık|’lık|lik|lük|luk|lık)/g)].map((m) => toNum(m[1])).filter((n) => n >= 2 && n <= 400);
       if (nums.length >= 2) { const [a, b] = nums.slice(0, 2).sort((x, y) => x - y); set('fast', a); set('slow', b); }
       else if (nums.length === 1) { set('slow', nums[0]); set('fast', Math.max(2, Math.round(nums[0] / 4))); assumptions.push(`Tek ortalama verildi (${nums[0]} gün); hızlı ortalama ${Math.max(2, Math.round(nums[0] / 4))} gün varsayıldı.`); }
       if (/\bema\b|üssel/.test(t)) {
@@ -110,11 +110,13 @@
     if (/açığa|short|kaldıraç|vadeli|opsiyon|viop/.test(t)) warnings.push('Açığa satış, kaldıraç ve türev ürünler desteklenmiyor; strateji yalnızca alım yönlü (long) test edilir.');
     if (/dakika|saatlik|gün içi|intraday/.test(t)) warnings.push('Gün içi (dakikalık/saatlik) test henüz yok; günlük kapanış verisiyle test edilir.');
 
+    const timeframe = /haftalık (mum|bar|kapanış|grafik)|haftalık bazda|haftalık olarak|weekly/.test(t) ? '1w' : /aylık (mum|bar|kapanış|grafik)|aylık bazda|monthly/.test(t) ? '1mo' : '1d';
+    if (timeframe !== '1d') assumptions.push(`${timeframe === '1w' ? 'Haftalık' : 'Aylık'} mumlar kullanıldı; periyotlar mum sayısıdır.`);
     const symbols = extractSymbols(text, opts.knownSymbols);
     return {
       provider: 'rules', templateId: tpl.id, name: tpl.name,
       summary: tpl.summary + ' (Kural tabanlı çevirici: Grok bağlı değilken en yakın hazır şablon seçildi ve sayılar metinden alındı.)',
-      code, symbols, assumptions, warnings,
+      code, symbols, timeframe, assumptions, warnings,
     };
   }
 

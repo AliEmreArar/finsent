@@ -235,6 +235,45 @@
     };
   }
 
+  // Daily bars -> weekly ('1w', week labelled by its last trading day) or monthly ('1mo') bars.
+  // Sentiment becomes the mean of the period's non-null daily values.
+  function aggregateBars(s, timeframe) {
+    if (!timeframe || timeframe === '1d') return s;
+    const key = (d) => {
+      if (timeframe === '1mo') return d.slice(0, 7);
+      const t = new Date(d + 'T00:00:00Z');
+      const monday = new Date(t.getTime() - ((t.getUTCDay() + 6) % 7) * 864e5);
+      return monday.toISOString().slice(0, 10);
+    };
+    const out = { date: [], open: [], high: [], low: [], close: [], volume: [], sentiment: [] };
+    let cur = null, sSum = 0, sN = 0;
+    const flush = () => {
+      if (!cur) return;
+      out.sentiment.push(sN ? sSum / sN : null);
+      sSum = 0; sN = 0;
+    };
+    s.date.forEach((d, i) => {
+      const k = key(d);
+      if (!cur || cur !== k) {
+        flush();
+        cur = k;
+        out.date.push(d); out.open.push(s.open?.[i] ?? s.close[i]); out.high.push(s.high?.[i] ?? s.close[i]);
+        out.low.push(s.low?.[i] ?? s.close[i]); out.close.push(s.close[i]); out.volume.push(s.volume?.[i] ?? 0);
+      } else {
+        const j = out.date.length - 1;
+        out.date[j] = d;   // label with the last trading day, so fills happen after the period closes
+        out.high[j] = Math.max(out.high[j], s.high?.[i] ?? s.close[i]);
+        out.low[j] = Math.min(out.low[j], s.low?.[i] ?? s.close[i]);
+        out.close[j] = s.close[i];
+        out.volume[j] += s.volume?.[i] ?? 0;
+      }
+      const sv = s.sentiment?.[i];
+      if (isNum(sv)) { sSum += sv; sN++; }
+    });
+    flush();
+    return { ...s, ...out };
+  }
+
   // Aligns several symbols on one calendar (the union of their trading days). A symbol with no
   // bar on a day gets null there and cannot be traded that day.
   function alignSeries(raw, calendar) {
@@ -306,7 +345,8 @@
     maxBarsOps: 5e7,
     adjustCorporateActions: true,
     startDate: null,     // trading begins here; earlier bars are indicator warm-up only
-    cashRatePct: 0,      // annual interest on idle cash (TL deposit / money-market fund), compounded per calendar day
+    cashRatePct: 0,
+    timeframe: '1d',     // '1d' | '1w' | '1mo': bars are aggregated before indicators run      // annual interest on idle cash (TL deposit / money-market fund), compounded per calendar day
   };
 
   class StrategyError extends Error {
@@ -323,13 +363,15 @@
     // corporate-action adjustment per symbol, then alignment
     const raw = {};
     const corporateActions = {};
-    for (const [sym, s] of Object.entries(data)) {
-      if (!s || !s.date || !s.date.length) { warnings.push(`${sym}: veri yok, atlandı.`); continue; }
+    for (const [sym, s0] of Object.entries(data)) {
+      if (!s0 || !s0.date || !s0.date.length) { warnings.push(`${sym}: veri yok, atlandı.`); continue; }
+      let s = s0;
       if (cfg.adjustCorporateActions && !s.noAdjust) {
         const r = adjustCorporateActions(s);
-        raw[sym] = r.series;
+        s = r.series;
         if (r.events.length) corporateActions[sym] = r.events;
-      } else raw[sym] = s;
+      }
+      raw[sym] = aggregateBars(s, cfg.timeframe);
     }
     const symbols = Object.keys(raw);
     if (!symbols.length) throw new StrategyError('Seçilen hisseler için veri bulunamadı.');
@@ -337,6 +379,7 @@
     const n = dates.length;
     let start = 0;
     if (cfg.startDate) {
+      // with weekly / monthly bars, the first bar whose period ends on or after the start date
       start = dates.findIndex((d) => d >= cfg.startDate);
       if (start < 0) throw new StrategyError('Başlangıç tarihinden sonra veri yok.');
     }
@@ -475,7 +518,7 @@
       return sym;
     };
     const ctx = {
-      symbols, params: p, state, ta,
+      symbols, params: p, state, ta, timeframe: cfg.timeframe || '1d',
       get i() { return i; },
       get date() { return dates[i]; },
       get cash() { return cash; },
@@ -587,6 +630,7 @@
     const bh = buyAndHold(series, symbols, start, cfg);
     result.buyHold = { equity: bh, metrics: computeMetrics(eqDates, bh, [], { initial: cfg.initialCapital, rfAnnualPct: rf }) };
     if (benchmark && benchmark.date && benchmark.date.length) {
+      // the benchmark stays daily: alignBenchmark samples it on the strategy's bar dates
       const bm = alignBenchmark(benchmark, eqDates, cfg.initialCapital);
       if (bm) result.benchmark = { name: benchmark.name || 'Endeks', equity: bm, metrics: computeMetrics(eqDates, bm, [], { initial: cfg.initialCapital, rfAnnualPct: rf }) };
     }
@@ -664,7 +708,7 @@
     let maxDD = 0, ddStart = 0, maxDur = 0, curStart = 0;
     for (let k = 0; k < n; k++) {
       if (dd[k] === 0) curStart = k;
-      else if (k - curStart > maxDur) { maxDur = k - curStart; ddStart = curStart; }
+      else { const dur = Math.round((Date.parse(dates[k]) - Date.parse(dates[curStart])) / 864e5); if (dur > maxDur) { maxDur = dur; ddStart = curStart; } }
       if (dd[k] < maxDD) maxDD = dd[k];
     }
     const totalReturn = final / initial - 1;
@@ -826,5 +870,5 @@
     };
   }
 
-  return { ta, backtest, monteCarlo, rollingWindows, compileStrategy, resolveParams, computeMetrics, adjustCorporateActions, alignSeries, sweep, walkForward, gridValues, periodReturns, drawdownSeries, StrategyError, DEFAULTS };
+  return { ta, backtest, monteCarlo, rollingWindows, aggregateBars, compileStrategy, resolveParams, computeMetrics, adjustCorporateActions, alignSeries, sweep, walkForward, gridValues, periodReturns, drawdownSeries, StrategyError, DEFAULTS };
 });

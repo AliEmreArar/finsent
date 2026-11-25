@@ -33,10 +33,11 @@ The code must define exactly one object `const strategy = { ... }` with:
      Return an object of arrays (same length as s.close), e.g. { rsi: ta.rsi(s.close, p.rsiLen) }.
      Values at index i must only depend on data up to i (no look-ahead). Use ta.ref(x, 1) for "yesterday".
   onBar(ctx, p)  called on every bar after the close. Decide and place orders.
+     Bars are daily by default; with "timeframe" 1w / 1mo they are weekly / monthly and periods count bars.
      Orders placed on bar i are filled at bar i+1's OPEN (no look-ahead), with commission + slippage.
 
 ctx (read):
-  ctx.symbols (string[]), ctx.i (bar index), ctx.date ('YYYY-MM-DD'), ctx.cash, ctx.equity, ctx.isLastBar,
+  ctx.symbols (string[]), ctx.timeframe ('1d' | '1w' | '1mo': bars are daily, weekly or monthly), ctx.i (bar index), ctx.date ('YYYY-MM-DD'), ctx.cash, ctx.equity, ctx.isLastBar,
   ctx.has(sym) -> did the stock trade today, ctx.close(sym, ago=0), ctx.bar(sym, ago=0) -> {date,open,high,low,close,volume,sentiment} | null,
   ctx.ind(sym, 'name', ago=0) -> value of a series returned by indicators() at this bar (NaN during warm-up),
   ctx.sentiment(sym, ago=0) -> number | null, ctx.series(sym) -> full aligned arrays,
@@ -120,6 +121,8 @@ strategy API below, so the user can backtest it on historical daily data with vi
   ALTIN is gram gold in TL.
 - "summary": explain the rules to a non-programmer in Turkish, 2-5 short sentences.
 - "code": the full JavaScript, nothing else (no markdown fences).
+- "timeframe": "1w" when the rules are about weekly bars/closes ("haftalık"), "1mo" for monthly bars,
+  otherwise "1d". Periods in the code then count those bars (20 weekly bars = 20 weeks).
 - This is a research tool, not investment advice; never promise returns.
 
 TXT;
@@ -179,10 +182,11 @@ TXT;
                 'summary' => ['type' => 'string'],
                 'code' => ['type' => 'string'],
                 'symbols' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'timeframe' => ['type' => 'string', 'enum' => ['1d', '1w', '1mo']],
                 'assumptions' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
             ],
-            'required' => ['name', 'summary', 'code', 'symbols', 'assumptions', 'warnings'],
+            'required' => ['name', 'summary', 'code', 'symbols', 'timeframe', 'assumptions', 'warnings'],
             'additionalProperties' => false,
         ];
     }
@@ -282,6 +286,7 @@ TXT;
             }
         }
         $out['symbols'] = array_values(array_unique($syms));
+        $out['timeframe'] = in_array($out['timeframe'] ?? '1d', ['1d', '1w', '1mo'], true) ? ($out['timeframe'] ?? '1d') : '1d';
         foreach (['assumptions', 'warnings'] as $k) {
             $out[$k] = array_values(array_filter(array_map('strval', (array) ($out[$k] ?? [])), fn($v) => trim($v) !== ''));
         }

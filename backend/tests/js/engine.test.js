@@ -383,3 +383,38 @@ test('rollingWindows: counts windows and beat rate against a reference', () => {
   assert.ok(r.worst <= r.median && r.median <= r.best);
   assert.equal(E.rollingWindows(st.date.slice(0, 50), st.close.slice(0, 50), null, 365), null);
 });
+
+test('aggregateBars: weekly and monthly OHLCV, labelled by the last trading day', () => {
+  const s = makeSeries([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], '2024-01-01', { sentiment: [null, 0.5, null, 1, null, null, null, null, null, -1, null] });
+  const w = E.aggregateBars(s, '1w');
+  assert.deepEqual(w.date, ['2024-01-05', '2024-01-12', '2024-01-15']);
+  assert.deepEqual(w.close, [14, 19, 20]);
+  assert.equal(w.open[0], s.open[0]);
+  assert.equal(w.high[1], Math.max(...s.high.slice(5, 10)));
+  assert.equal(w.volume[0], 5000);
+  assert.deepEqual(w.sentiment, [0.75, -1, null]);
+  const m = E.aggregateBars(makeSeries(randomWalk(70)), '1mo');
+  assert.equal(m.date.length, 4);
+  assert.equal(E.aggregateBars(s, '1d'), s);
+});
+
+test('weekly backtest runs on weekly bars and fills on the next weekly bar', () => {
+  const s = makeSeries(randomWalk(400, 3));
+  const r = E.backtest({ code: BUY_FIRST_DAY, data: { A: s }, config: { timeframe: '1w' } });
+  assert.ok(r.dates.length > 75 && r.dates.length < 85);
+  assert.equal(r.fills[0].date, r.dates[1]);
+});
+
+test('offline parser: "kapanış" is not KAP news; weekly averages are read', () => {
+  const r = NLP.parse('Haftalık kapanış 10 haftalık ortalamanın üstündeyse al, 30 haftalık ortalamanın altına inince sat');
+  assert.equal(r.templateId, 'sma_cross');
+  assert.equal(r.timeframe, '1w');
+  const p = E.resolveParams(E.compileStrategy(r.code));
+  assert.equal(p.fast, 10); assert.equal(p.slow, 30);
+  assert.equal(NLP.parse("KAP'ta olumlu haber gelince al").templateId, 'kap_sentiment');
+});
+
+test('drawdown duration is measured in calendar days, not bars', () => {
+  const m = E.computeMetrics(['2020-01-01', '2020-01-08', '2020-01-15', '2020-01-22'], [100, 90, 95, 101], []);
+  assert.equal(m.maxDrawdownDays, 14);
+});

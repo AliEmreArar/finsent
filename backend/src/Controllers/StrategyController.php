@@ -61,7 +61,9 @@ final class StrategyController
         if ($from >= $to) {
             throw new HttpError(400, 'from must be before to');
         }
-        $warmFrom = (new \DateTimeImmutable($from))->modify('-' . self::WARMUP_DAYS . ' days')->format('Y-m-d');
+        // weekly / monthly strategies need more history before the start for their indicators
+        $warm = Http::intQuery('warmup_days', self::WARMUP_DAYS, 30, 6000);
+        $warmFrom = (new \DateTimeImmutable($from))->modify('-' . $warm . ' days')->format('Y-m-d');
         $withSentiment = Http::query('sentiment', '1') !== '0';
 
         $series = [];
