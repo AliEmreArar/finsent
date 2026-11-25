@@ -33,7 +33,8 @@ Diyagramlar GitHub'da otomatik çizilir (Mermaid formatı).
 18. [Güvenlik ve iyi pratikler](#18-güvenlik-ve-iyi-pratikler)
 19. [Test](#19-test)
 20. [Önerilen çalışma planı ve alıştırmalar](#20-önerilen-çalışma-planı-ve-alıştırmalar)
-21. [Sözlük](#21-sözlük)
+21. [Strateji Laboratuvarı: backtest ve tuzakları](#21-strateji-laboratuvarı-backtest-ve-tuzakları)
+22. [Sözlük](#22-sözlük)
 
 ---
 
@@ -679,6 +680,8 @@ flowchart LR
 | Salt-okunur bağlama | Orijinal veritabanı `:ro`, yanlışlıkla değiştirilemez |
 | Kaynak sınırları | Konteyner bellek limitleri |
 | Dürüst raporlama | Model güvenilirliği arayüzde açıkça yazılır ("AUC 0,50 = yazı-tura") |
+| Güvenilmeyen kodu yalıtma | LLM'in yazdığı strateji kodu sunucuda değil, tarayıcıda ağ erişimi olmayan bir Web Worker'da, sıkı CSP altında çalışır (§21) |
+| Yarış durumu | Sanal portföy emirleri veritabanı işlemi ve satır kilidiyle (`SELECT … FOR UPDATE`) yazılır |
 
 ---
 
@@ -689,6 +692,9 @@ flowchart LR
 - **Birim testleri:** duygu sözlüğü, tekilleştirme, kalite kontrolleri, örüntü dedektörleri.
 - **Mock (taklit):** S3 testleri `moto` kütüphanesiyle sahte S3'e yazar. Grok testleri sahte HTTP cevaplarıyla çalışır; testler para harcamaz, internete çıkmaz.
 - **Sentetik veri testi:** altın modelinin aralık kalibrasyonu, rastgele yürüyüşle üretilmiş fiyatlarda test edilir. "%90 bant ~%90 kapsamalı."
+- **Strateji motoru:** `node --test 'backend/tests/js/*.test.js'`. Bilinen sonuçlu küçük senaryolar kurulur (ör. "ilk gün al, fiyat %21 artsın, sermaye tam %21 artmalı"; "2 kat kaldıraçlı kopyanın betası 2 olmalı"). Bulunan her hata için bir "regresyon testi" eklenir ki hata geri dönmesin.
+- **PHP:** `php backend/tests/php/run.php` (bağımlılıksız küçük test koşucusu).
+- **Uçtan uca (E2E):** Playwright ile gerçek tarayıcıda sayfa açılır, butonlara basılır, sonuç kontrol edilir. Grok gibi dış servisler için sahte (mock) sunucu kullanılır.
 
 ---
 
@@ -729,7 +735,78 @@ flowchart LR
 
 ---
 
-## 21. Sözlük
+## 21. Strateji Laboratuvarı: backtest ve tuzakları
+
+**Backtest**, bir alım-satım kuralını geçmiş verinin üzerinde "o gün yaşasaydık ne olurdu" diye oynatmaktır. Laboratuvarda kural Türkçe anlatılır, Grok onu JavaScript'e çevirir, motor (`backend/public/assets/strategy/engine.js`) geçmiş günleri tek tek dolaşır ve sanal parayla işlem yapar.
+
+```mermaid
+flowchart LR
+  U[Kullanıcı: Türkçe kural] --> G[Grok: yapılandırılmış çıktı<br/>name, summary, code, timeframe]
+  G --> E[Kod editörü<br/>düzenlenebilir]
+  E --> W[Web Worker sandbox<br/>ağ yok, CSP]
+  D[/api/strategy/data<br/>fiyat + KAP duygu/] --> W
+  W --> R[Sonuç: metrikler, eğriler,<br/>işlemler, sinyaller]
+  R --> V[Grok değerlendirmesi]
+  R --> P[Sanal portföy]
+```
+
+### Strateji kodu neye benzer?
+
+```js
+const strategy = {
+  params: { len: { label: 'Periyot', default: 20, min: 5, max: 100 } },   // kaydırıcı olur
+  indicators(s, p, ta) { return { avg: ta.sma(s.close, p.len) }; },      // bir kez hesaplanır
+  onBar(ctx, p) {                                                          // her gün kapanışta
+    const sym = ctx.symbols[0], avg = ctx.ind(sym, 'avg');
+    if (!ta.isNum(avg)) return;
+    if (!ctx.position(sym) && ctx.close(sym) > avg) ctx.buy(sym, { percent: 100, stopLoss: 0.08 });
+    else if (ctx.position(sym) && ctx.close(sym) < avg) ctx.sell(sym);
+  },
+};
+```
+
+### Backtest'in klasik tuzakları ve projedeki önlemleri
+
+| Tuzak | Ne demek? | Laboratuvarda |
+|---|---|---|
+| **Geleceği görme (look-ahead bias)** | Karar anında bilinmeyen bilgiyi kullanmak, ör. bugünün kapanışıyla bugünün kapanışından almak | Sinyal kapanışta oluşur, emir **ertesi günün açılışında** gerçekleşir. Göstergeler `i` anına kadarki veriyle hesaplanır. KAP haberi 18:00'den sonra geldiyse ertesi seansa yazılır |
+| **Hayatta kalan yanılgısı (survivorship bias)** | Bugün hâlâ borsada olan (yani başarılı) hisseleri seçip geçmişi test etmek | "En likit 10/20" sepeti **başlangıç tarihindeki** işlem hacmine göre seçilir; sonradan borsadan çıkan hisseler de gelebilir |
+| **Aşırı uyum (overfitting)** | Parametreleri geçmişe ezberletmek: geçmişte harika, gelecekte kötü | Parametre taraması ısı haritasında komşu ayarlar da görünür; "kârlı ayar oranı" notu. **Eğitim/test ayrımı** (walk-forward): en iyi ayar ilk dönemde seçilir, hiç görmediği dönemde denenir |
+| **Şans** | Az sayıda işlem veya tek iyi dönem | İşlem sayısı uyarısı, **Monte Carlo** (getirilerin sırasını karıştırıp 1.000 alternatif geçmiş) ve **kayan pencereler** (her günü başlangıç sayıp 1/3 yıllık sonuçlar) |
+| **Maliyetleri unutmak** | Komisyon ve kaymayı yok saymak | Her alım ve satışta komisyon + kayma; tam sayı lot |
+| **Bedelsiz/bölünme** | Ham fiyatta %50 "düşüş" aslında bedelsiz sermaye artırımıdır | BIST'te günlük limit ±%10; gece ±%30'u aşan sıçrama sermaye işlemi sayılır ve geçmiş fiyatlar ölçeklenir |
+| **Enflasyon ve faiz** | TL getirileri enflasyonla şişer; nakitte beklemek de faiz kazandırır | USD bazında test, altın/dolar kıyası, "nakit faizi" ayarı. Sharpe oranı mevduatın **üzerindeki** getiriyle hesaplanır |
+
+### Ölçümler ne anlatır?
+
+- **CAGR (yıllık bileşik getiri):** başlangıçtan sona ortalama yıllık büyüme.
+- **En büyük düşüş (max drawdown):** zirveden en derin düşüş. "Bu kadarını görmeye dayanabilir miyim?" sorusu.
+- **Sharpe:** getiri / oynaklık (risksiz faizin üstündeki kısım). 1'in üstü iyi sayılır. **Sortino** yalnızca aşağı yönlü oynaklığı cezalandırır.
+- **Beta / alfa:** beta 1 → endeksle aynı riskte. Alfa, beta riskiyle açıklanamayan yıllık fazla getiri.
+- **Kâr faktörü:** toplam kazanç / toplam kayıp.
+- **Piyasada kalma (exposure):** zamanın ne kadarında hissede olunduğu.
+
+### Güvenlik: LLM'in yazdığı kodu çalıştırmak
+
+Grok'un (ya da başkasının) yazdığı kod **güvenilmeyen koddur**. Bu yüzden:
+
+1. Kod sunucuda hiç çalışmaz; tarayıcıda bir **Web Worker** içinde çalışır (sayfanın DOM'una, çerezlerine erişemez).
+2. Worker betiği (`/assets/strategy/sandbox.js`), **CSP** (İçerik Güvenliği Politikası) başlığıyla sunulur: `default-src 'none'; script-src 'unsafe-eval'; connect-src 'none'; worker-src 'none'`. fetch, XHR, EventSource, iç içe Worker ve `import()` tarayıcı tarafından engellenir.
+3. Sonsuz döngüye giren kod zaman aşımında durdurulur (worker sonlandırılır).
+4. Worker'dan sayfaya yalnızca veri döner. Parametreler sayıya zorlanır, metinler `esc()` ile kaçışlanır (XSS önlemi).
+
+### Alıştırmalar
+
+1. "Al ve tut" şablonunu THYAO'da 10 yıl çalıştır. Sonra TL yerine USD seç: getiri nasıl değişti, neden?
+2. RSI şablonunda parametre taraması yap. En iyi hücrenin komşuları da iyi mi? Eğitim/test sekmesinde en iyi ayar test döneminde ne yaptı?
+3. Momentum rotasyonunu "En likit 20" sepetiyle 2015'ten başlat. Aynı testi bugünün en büyük 20 hissesiyle yap. Fark neden çıktı? (İpucu: hayatta kalan yanılgısı.)
+4. Bir stratejide "Nakit faizi"ni %0'dan %40'a çıkar. Sharpe neden düştü?
+5. Monte Carlo sekmesinde gerçekleşen sonuç dağılımın hangi yüzdeliğinde? %95'in üstündeyse ne düşünmelisin?
+6. `engine.test.js`'ye kendi testini yaz: "fiyat hiç değişmiyorsa ve komisyon %0,1 ise al-sat yapan stratejinin sermayesi tam olarak ne kadar azalır?"
+
+---
+
+## 22. Sözlük
 
 | Terim | Kısa anlamı |
 |---|---|
@@ -760,3 +837,9 @@ flowchart LR
 | Checksum (sha256) | Dosyanın parmak izi. Bozulma ve değişikliği yakalar |
 | Upsert | Varsa güncelle, yoksa ekle |
 | Walk-forward | Zamana saygılı, ileri yürüyen test yöntemi |
+| CSP | İçerik Güvenliği Politikası: bir betiğin hangi kaynaklara erişebileceğini tarayıcıya söyleyen başlık |
+| Drawdown | Sermayenin önceki zirvesinden geri çekilme oranı |
+| Look-ahead bias | Backtest'te karar anında bilinemeyecek veriyi kullanma hatası (geleceği görme) |
+| Monte Carlo | Rastgele yeniden örneklemeyle olası sonuçların dağılımını çıkarma |
+| Survivorship bias | Yalnızca bugün var olanları inceleyip batanları unutma hatası |
+| Web Worker | Tarayıcıda sayfadan ayrı iş parçacığında çalışan JavaScript ortamı |
