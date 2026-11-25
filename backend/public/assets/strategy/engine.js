@@ -202,7 +202,8 @@
     return src.map((_, i) => (i >= n ? src[i - n] : NaN));
   }
 
-  const ta = { sma, ema, rma, rsi, macd, bollinger, stdev, highest, lowest, atr, trueRange, stochastic, adx, obv, roc, change, zscore, crossover, crossunder, ref, isNum };
+  // frozen: a strategy cannot replace ta.sma etc. and change the results of later runs
+  const ta = Object.freeze({ sma, ema, rma, rsi, macd, bollinger, stdev, highest, lowest, atr, trueRange, stochastic, adx, obv, roc, change, zscore, crossover, crossunder, ref, isNum });
 
   // ------------------------------------------------------------------ data preparation
   // BIST equities have a ±10% daily price limit, so an overnight move beyond the threshold is
@@ -335,6 +336,17 @@
     return p;
   }
 
+  // Stop / target distances: fractions (0.08) or percents (8 -> 8 %). Values >= 1 are percents, so
+  // "1" means 1 %. Stops must be below 100 %; a take-profit may exceed 100 % (e.g. 150 = +150 %).
+  function normPct(v, allowAboveOne = false) {
+    if (v === null || v === undefined || v === false) return null;
+    let x = Number(v);
+    if (!Number.isFinite(x) || x <= 0) return null;
+    if (x >= 1) x /= 100;
+    if (!allowAboveOne && x >= 1) return null;
+    return x;
+  }
+
   // ------------------------------------------------------------------ backtester
   const DEFAULTS = {
     initialCapital: 100000,
@@ -434,7 +446,11 @@
         let budget;
         if (order.shares != null) budget = order.shares * price * (1 + comm);
         else if (order.amount != null) budget = order.amount;
-        else if (order.riskPercent != null && order.stopLoss) budget = (eq * order.riskPercent) / 100 / order.stopLoss;   // lose riskPercent of equity if the stop is hit
+        else if (order.riskPercent != null) {
+          // lose riskPercent of equity if the stop is hit; without a stop the size is undefined, so skip the order
+          if (!order.stopLoss) { warnOnce('riskPercent', 'riskPercent için stopLoss gerekli; stopsuz emirler atlandı.'); return false; }
+          budget = (eq * order.riskPercent) / 100 / order.stopLoss;
+        }
         else if (order.percent != null) budget = (eq * order.percent) / 100;
         else if (order.targetPercent != null) {
           const cur = pos ? pos.shares * base : 0;
@@ -556,27 +572,41 @@
       setStop(sym, { stopLoss, takeProfit, trailingStop } = {}) {
         const pos = positions[checkSym(sym)];
         if (!pos) return;
-        if (stopLoss !== undefined) pos.stopLoss = stopLoss;
-        if (takeProfit !== undefined) pos.takeProfit = takeProfit;
-        if (trailingStop !== undefined) pos.trailingStop = trailingStop;
+        if (stopLoss !== undefined) pos.stopLoss = normPct(stopLoss);
+        if (takeProfit !== undefined) pos.takeProfit = normPct(takeProfit, true);
+        if (trailingStop !== undefined) pos.trailingStop = normPct(trailingStop);
       },
       log(...a) { if (logs.length < 500) logs.push({ date: dates[i], msg: a.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(' ') }); },
     };
     function normOpts(o) {
       if (typeof o === 'number') return { percent: o };
       const out = { ...o };
-      for (const k of ['stopLoss', 'takeProfit', 'trailingStop']) {
-        if (out[k] != null) {
-          let v = Number(out[k]);
-          if (v > 1) v = v / 100;   // "8" means 8 %
-          out[k] = v > 0 && v < 1 ? v : null;
-        }
-      }
+      for (const k of ['stopLoss', 'takeProfit', 'trailingStop']) if (out[k] != null) out[k] = normPct(out[k], k === 'takeProfit');
       return out;
+    }
+    const warned = new Set();
+    function warnOnce(key, msg) { if (!warned.has(key)) { warned.add(key); warnings.push(msg); } }
+
+    // Executes one bar's orders: sells and target reductions first (their cash funds the buys),
+    // then buys and target increases. A target order's direction depends on the price at fill time.
+    function executeBatch(orders, k, field) {
+      const isReduce = (o) => {
+        if (o.side === 'sell') return true;
+        if (o.targetPercent == null) return false;
+        const s = series[o.sym], pos = positions[o.sym];
+        if (!pos || !s.has[k]) return false;
+        const eq = valueAt(k - (field === 'open' ? 1 : 0));
+        return pos.shares * s[field][k] > (eq * o.targetPercent) / 100;
+      };
+      const first = [], second = [];
+      orders.forEach((o) => (isReduce(o) ? first : second).push(o));
+      first.forEach((o) => execute(o, k, field));
+      second.forEach((o) => execute(o, k, field));
     }
 
     // ---- main loop
     const priceField = cfg.fill === 'close' ? 'close' : 'open';
+    let lastBarOrders = [];
     for (i = start; i < n; i++) {
       if (dailyRate && i > start && cash > 0) {
         const days = Math.max(0, Math.round((Date.parse(dates[i]) - Date.parse(dates[i - 1])) / 864e5));
@@ -587,8 +617,7 @@
       if (priceField === 'open' && pending.length) {
         // sells first so their cash funds the buys
         const orders = pending; pending = [];
-        orders.filter((o) => o.side === 'sell').forEach((o) => execute(o, i, 'open'));
-        orders.filter((o) => o.side === 'buy').forEach((o) => execute(o, i, 'open'));
+        executeBatch(orders, i, 'open');
       }
       checkStops(i);
       try {
@@ -599,15 +628,17 @@
       }
       if (priceField === 'close' && pending.length) {
         const orders = pending; pending = [];
-        orders.filter((o) => o.side === 'sell').forEach((o) => execute(o, i, 'close'));
-        orders.filter((o) => o.side === 'buy').forEach((o) => execute(o, i, 'close'));
+        if (i === n - 1) lastBarOrders = orders;   // still today's signals in close-fill mode
+        executeBatch(orders, i, 'close');
       }
       equity[i] = valueAt(i);
       exposure[i] = equity[i] > 0 ? 1 - cash / equity[i] : 0;
     }
     i = n - 1;
     // orders placed on the last bar: these are "today's signals"
-    const signals = pending.map((o) => ({ sym: o.sym, side: o.side, reason: o.reason || '', percent: o.percent ?? o.targetPercent ?? null }));
+    const signals = (priceField === 'close' ? lastBarOrders : pending).map((o) => ({
+      sym: o.sym, side: o.targetPercent != null ? 'target' : o.side, reason: o.reason || '',
+      percent: o.percent ?? null, targetPercent: o.targetPercent ?? null, shares: o.shares ?? null, amount: o.amount ?? null }));
     const open = Object.keys(positions).map((s) => ({ sym: s, ...posView(s) }));
 
     const eqDates = dates.slice(start), eqVals = equity.slice(start);
@@ -795,7 +826,7 @@
   }
 
   function sweep({ code, data, params = {}, config = {}, grid, maxRuns = 400, onProgress }) {
-    const strat = compileStrategy(code);
+    compileStrategy(code);   // fail fast on syntax errors
     const keys = Object.keys(grid);
     const axes = keys.map((k) => gridValues(grid[k]));
     const combos = axes.reduce((acc, vals, j) => acc.flatMap((c) => vals.map((v) => ({ ...c, [keys[j]]: v }))), [{}]);
@@ -803,7 +834,7 @@
     const rows = [];
     combos.forEach((c, j) => {
       try {
-        const r = backtest({ strategy: strat, data, params: { ...params, ...c }, config });
+        const r = backtest({ code, data, params: { ...params, ...c }, config });   // fresh compile: no state shared between runs
         const m = r.metrics;
         rows.push({ params: c, totalReturn: m.totalReturn, cagr: m.cagr, sharpe: m.sharpe, maxDrawdown: m.maxDrawdown, trades: m.trades, winRate: m.winRate });
       } catch (e) {
@@ -898,5 +929,5 @@
     };
   }
 
-  return { ta, backtest, monteCarlo, rollingWindows, aggregateBars, relativeMetrics, compileStrategy, resolveParams, computeMetrics, adjustCorporateActions, alignSeries, sweep, walkForward, gridValues, periodReturns, drawdownSeries, StrategyError, DEFAULTS };
+  return { ta, normPct, backtest, monteCarlo, rollingWindows, aggregateBars, relativeMetrics, compileStrategy, resolveParams, computeMetrics, adjustCorporateActions, alignSeries, sweep, walkForward, gridValues, periodReturns, drawdownSeries, StrategyError, DEFAULTS };
 });

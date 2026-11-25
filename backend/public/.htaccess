@@ -1,3 +1,10 @@
+# The app runs strategies in /assets/strategy/sandbox.js (built by index.php with a strict CSP).
+# worker.js itself stays locked down too if anything loads it directly.
+<Files "worker.js">
+    Header always set Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-eval'; connect-src 'none'; worker-src 'none'"
+    Header always set Cache-Control "no-cache"
+</Files>
+
 RewriteEngine On
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d

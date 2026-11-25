@@ -20,7 +20,7 @@
   const pools = {};
   function getPool(name) {
     if (pools[name]) return pools[name];
-    const pool = { worker: new Worker('/assets/strategy/worker.js'), waiting: new Map() };
+    const pool = { worker: new Worker('/assets/strategy/sandbox.js'), waiting: new Map() };
     pool.worker.onmessage = (ev) => {
       const { id, progress } = ev.data;
       const w = pool.waiting.get(id);
@@ -496,11 +496,13 @@
       if (typeof sp.default === 'boolean') {
         return `<label class="lab-param bool"><input type="checkbox" data-k="${esc(k)}" ${val ? 'checked' : ''}><span>${esc(sp.label)}</span></label>`;
       }
-      const min = sp.min ?? Math.min(0, sp.default), max = sp.max ?? Math.max(sp.default * 3, 10), step = sp.step ?? (Number.isInteger(sp.default) ? 1 : 0.1);
+      const n = (x, d) => (Number.isFinite(Number(x)) ? Number(x) : d);   // attribute values are always plain numbers
+      const def = n(sp.default, 0), v = n(val, def);
+      const min = n(sp.min, Math.min(0, def)), max = n(sp.max, Math.max(def * 3, 10)), step = n(sp.step, Number.isInteger(def) ? 1 : 0.1);
       return `<div class="lab-param"><div class="lab-param-head"><span>${esc(sp.label)}</span>
-          <input type="number" class="lab-param-num" data-k="${esc(k)}" value="${val}" min="${min}" max="${max}" step="${step}"></div>
-        <input type="range" data-k="${esc(k)}" value="${val}" min="${min}" max="${max}" step="${step}">
-        <div class="lab-param-foot"><span>${min}</span>${val !== sp.default ? `<button class="linkbtn" data-reset="${esc(k)}">varsayılan: ${sp.default}</button>` : ''}<span>${max}</span></div></div>`;
+          <input type="number" class="lab-param-num" data-k="${esc(k)}" value="${v}" min="${min}" max="${max}" step="${step}"></div>
+        <input type="range" data-k="${esc(k)}" value="${v}" min="${min}" max="${max}" step="${step}">
+        <div class="lab-param-foot"><span>${min}</span>${v !== def ? `<button class="linkbtn" data-reset="${esc(k)}">varsayılan: ${def}</button>` : ''}<span>${max}</span></div></div>`;
     }).join('');
     $$('input[data-k]', box).forEach((inp) => {
       const k = inp.dataset.k;
@@ -655,8 +657,9 @@
 
   function signalsHtml(r) {
     if (!r.signals.length) return '<div class="muted small">Son kapanışa göre yeni bir al/sat sinyali yok.</div>';
-    return `<div class="rows">${r.signals.map((s) => `<div class="row" style="cursor:default"><span class="pill ${s.side === 'buy' ? 'pos' : 'neg'}">${s.side === 'buy' ? 'AL' : 'SAT'}</span>
-      <b>${esc(s.sym)}</b><span class="muted small" style="flex:1">${esc(s.reason)}</span>${s.percent ? `<span class="num small">%${num(s.percent, 0)}</span>` : ''}</div>`).join('')}</div>
+    const tag = (s) => (s.side === 'buy' ? ['AL', 'pos'] : s.side === 'sell' ? ['SAT', 'neg'] : ['HEDEF', 'acc']);
+    return `<div class="rows">${r.signals.map((s) => `<div class="row" style="cursor:default"><span class="pill ${tag(s)[1]}">${tag(s)[0]}</span>
+      <b>${esc(s.sym)}</b><span class="muted small" style="flex:1">${esc(s.reason)}</span>${Number.isFinite(s.targetPercent) ? `<span class="num small">ağırlık %${num(s.targetPercent, 0)}</span>` : Number.isFinite(s.percent) ? `<span class="num small">%${num(s.percent, 0)}</span>` : ''}</div>`).join('')}</div>
       <div class="toolbar" style="margin:10px 0 0"><button class="btn sm primary" id="lab-apply">Sanal portföye uygula</button>
         <span class="muted small">Alımlar portföy değerinin sinyaldeki yüzdesiyle, satışlar pozisyonun tamamıyla yapılır.</span></div>
       <p class="muted small" style="margin:6px 0 0">Sinyaller bir sonraki seansın açılışında uygulanırdı. Yatırım tavsiyesi değildir.</p>`;
@@ -671,11 +674,30 @@
       const full = await api(`/paper/${acc.id}`);
       if (!confirm(`${r.signals.length} sinyal "${full.name}" portföyüne uygulansın mı?`)) { btn.disabled = false; return; }
       const done = [], failed = [];
-      for (const s of r.signals.filter((x) => x.side === 'sell').concat(r.signals.filter((x) => x.side === 'buy'))) {
+      const held = (sym) => full.positions.find((p) => p.symbol === sym);
+      // translate each signal into a paper order with the same meaning as in the backtest
+      const toOrder = (s) => {
+        const h = held(s.sym);
+        if (s.side === 'sell') {
+          if (!h) return null;
+          if (s.shares) return { side: 'sell', shares: s.shares };
+          if (s.percent) return { side: 'sell', shares: Math.floor((h.shares * s.percent) / 100) };
+          return { side: 'sell' };
+        }
+        if (s.side === 'target') {
+          const diff = (full.value * s.targetPercent) / 100 - (h ? h.value : 0);
+          if (Math.abs(diff) < full.value * 0.002) return null;   // already at target
+          return diff > 0 ? { side: 'buy', amount: Math.floor(diff) } : (h ? { side: 'sell', shares: Math.floor(-diff / h.price) } : null);
+        }
+        if (s.shares) return { side: 'buy', shares: s.shares };
+        if (s.amount) return { side: 'buy', amount: Math.floor(s.amount) };
+        return { side: 'buy', amount: Math.floor((full.value * (s.percent ?? 100 / r.symbols.length)) / 100) };
+      };
+      const orders = r.signals.map((s) => ({ s, o: toOrder(s) })).filter((x) => x.o && !(x.o.shares === 0));
+      orders.sort((a, b) => (a.o.side === 'sell' ? 0 : 1) - (b.o.side === 'sell' ? 0 : 1));   // sells fund buys
+      for (const { s, o } of orders) {
         try {
-          const o = s.side === 'sell' ? { symbol: s.sym, side: 'sell' }
-            : { symbol: s.sym, side: 'buy', amount: Math.floor(full.value * (s.percent ?? 100 / r.symbols.length) / 100) };
-          const res = await window.paperApi.order(acc.id, { ...o, note: `${S.name}: ${s.reason}`.slice(0, 250) });
+          const res = await window.paperApi.order(acc.id, { symbol: s.sym, ...o, note: `${S.name}: ${s.reason}`.slice(0, 250) });
           done.push(`${res.side === 'buy' ? 'AL' : 'SAT'} ${res.shares} ${res.symbol}`);
         } catch (e) { failed.push(`${s.sym}: ${e.message}`); }
       }
@@ -801,8 +823,10 @@
   const METRICS = { sharpe: ['Sharpe', (v) => ratio(v)], cagr: ['Yıllık getiri', (v) => pct(v, 1)], totalReturn: ['Toplam getiri', (v) => pct(v, 1)], maxDrawdown: ['En büyük düşüş', (v) => pct(v, 1)] };
   function numericParams() { return Object.entries(meta?.params || {}).filter(([, sp]) => typeof sp.default === 'number'); }
   function axisDefaults(sp) {
-    const min = sp.min ?? Math.max(1, Math.round(sp.default / 2)), max = sp.max ?? sp.default * 2;
-    let step = sp.step ?? 1;
+    const n = (x, d) => (Number.isFinite(Number(x)) ? Number(x) : d);
+    const def = n(sp.default, 1);
+    const min = n(sp.min, Math.max(1, Math.round(def / 2))), max = n(sp.max, def * 2);
+    let step = n(sp.step, 1) > 0 ? n(sp.step, 1) : 1;
     while ((max - min) / step > 14) step *= 2;
     return { min, max, step };
   }
@@ -1119,7 +1143,7 @@
           <td class="small">${esc((c.symbols || []).slice(0, 5).join(', '))}${(c.symbols || []).length > 5 ? ` +${c.symbols.length - 5}` : ''}</td>
           <td class="small muted">${r.from ? `${fdate(r.from)} – ${fdate(r.to)}` : '–'}</td>
           <td class="num ${dirCls(r.cagr)}">${pct(r.cagr, 1)}</td><td class="num muted">${pct(r.buyHoldCagr, 1)}</td><td class="num down">${pct(r.maxDrawdown, 1)}</td>
-          <td class="num">${ratio(r.sharpe)}</td><td class="num">${r.trades ?? '–'}</td><td>${r.spark ? spark(r.spark, 90, 26) : ''}</td>
+          <td class="num">${ratio(r.sharpe)}</td><td class="num">${Number.isFinite(r.trades) ? num(r.trades, 0) : '–'}</td><td>${r.spark ? spark(r.spark, 90, 26) : ''}</td>
           <td><button class="linkbtn sl-del" data-id="${st.id}" title="Sil">Sil</button></td></tr>`; }).join('')}</table></div>`;
     const picks = () => $$('.sl-pick').filter((x) => x.checked).map((x) => Number(x.value));
     $$('.sl-pick').forEach((x) => (x.onchange = () => { $('#sl-go').disabled = picks().length < 1; }));

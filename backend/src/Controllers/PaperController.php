@@ -145,7 +145,7 @@ final class PaperController
             try {
                 $q = MarketController::quote($symbol);
                 if (!empty($q['price']) && !empty($q['market_time']) && substr((string) $q['market_time'], 0, 10) >= (string) $last['trade_date']) {
-                    return ['price' => (float) $q['price'], 'source' => 'canlı (gecikmeli)', 'as_of' => (string) $q['market_time']];
+                    return ['price' => (float) $q['price'], 'source' => 'gecikmeli canlı', 'as_of' => (string) $q['market_time']];
                 }
             } catch (\Throwable) {
                 // Yahoo unreachable: fall back to the stored close
@@ -308,18 +308,34 @@ final class PaperController
         if ($side === 'buy' && $shares === null && $amount === null) {
             throw new HttpError(400, 'adet veya tutar girin');
         }
-        $px = self::price($symbol);
-        $st = self::replay((float) $a['initial_cash'], self::trades((int) $a['id']));
-        $fill = self::sizeOrder($st, $symbol, $side, $px['price'], $shares, $amount, (float) $a['fee_bps']);
-        $res = ['symbol' => $symbol, 'side' => $side, 'shares' => $fill['shares'], 'price' => $px['price'], 'price_source' => $px['source'],
-                'as_of' => $px['as_of'], 'fee' => $fill['fee'], 'total' => $side === 'buy' ? $fill['gross'] + $fill['fee'] : $fill['gross'] - $fill['fee']];
-        if (!empty($b['preview'])) {
-            return $res + ['preview' => true];
+        $px = self::price($symbol);   // outside the transaction: may call Yahoo
+        $preview = !empty($b['preview']);
+        $pdo = Db::pdo();
+        if (!$preview) {
+            // serialise orders per account so two simultaneous orders cannot both spend the same cash
+            $pdo->beginTransaction();
+            Db::one('SELECT id FROM paper_accounts WHERE id = ? FOR UPDATE', [(int) $a['id']]);
         }
-        Db::exec('INSERT INTO paper_trades (account_id, symbol, side, shares, price, fee, price_source, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [(int) $a['id'], $symbol, $side, $fill['shares'], $px['price'], $fill['fee'], mb_substr($px['source'], 0, 16),
-             isset($b['note']) ? mb_substr((string) $b['note'], 0, 250) : null]);
-        return $res + ['id' => (int) Db::pdo()->lastInsertId()];
+        try {
+            $st = self::replay((float) $a['initial_cash'], self::trades((int) $a['id']));
+            $fill = self::sizeOrder($st, $symbol, $side, $px['price'], $shares, $amount, (float) $a['fee_bps']);
+            $res = ['symbol' => $symbol, 'side' => $side, 'shares' => $fill['shares'], 'price' => $px['price'], 'price_source' => $px['source'],
+                    'as_of' => $px['as_of'], 'fee' => $fill['fee'], 'total' => $side === 'buy' ? $fill['gross'] + $fill['fee'] : $fill['gross'] - $fill['fee']];
+            if ($preview) {
+                return $res + ['preview' => true];
+            }
+            Db::exec('INSERT INTO paper_trades (account_id, symbol, side, shares, price, fee, price_source, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [(int) $a['id'], $symbol, $side, $fill['shares'], $px['price'], $fill['fee'], mb_substr($px['source'], 0, 16),
+                 isset($b['note']) ? mb_substr((string) $b['note'], 0, 250) : null]);
+            $res['id'] = (int) $pdo->lastInsertId();
+            $pdo->commit();
+            return $res;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /** @return array<string,mixed> */

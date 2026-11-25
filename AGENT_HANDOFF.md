@@ -372,4 +372,12 @@ Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir 
 
 - Otomatik düzeltme: Grok'un ürettiği kod derlenmez veya ilk backtest'te çalışma hatası verirse hata mesajıyla `/api/strategy/fix` **bir kez** otomatik çağrılır, sonra test yeniden çalışır (sohbette "Kod hata verdi, Grok otomatik düzeltti" görünür). Zaman aşımı (sonsuz döngü) otomatik düzeltilmez. Sahte xAI sunucusuyla uçtan uca test edildi.
 
+**Kod incelemesi (bağımsız ajan) ve düzeltmeler:**
+- *Yeniden dengeleme:* `targetPercent` emirlerinin yönü (azaltma/artırma) gerçekleşme anında belirlenir. Azaltmalar satışlarla birlikte önce çalışır (`executeBatch`). Önceden rotasyon stratejilerinde nakit atıl kalıyordu ve sonuçlar yanlıştı.
+- *Stop değerleri:* `normPct` ile stop/hedef değerleri tek yerde yorumlanır: `1` = %1, `0.05` = %5. `setStop` de yüzde kabul eder. `riskPercent` stop olmadan emri atlar ve uyarı verir; önceden tüm nakitle alım yapıyordu.
+- *Paylaşılan durum:* `ta` dondurulmuştur. `sweep` her kombinasyonu yeniden derler, böylece üst düzey değişkenler kombinasyonlar arasında taşınmaz. `fill: close` modunda da "bugünün sinyalleri" dolu gelir. Sinyaller `side: 'target'`, `targetPercent`, `shares` ve `amount` taşır; "Sanal portföye uygula" bunları aynı anlamla emre çevirir.
+- *Sandbox:* Strateji kodu `/assets/strategy/sandbox.js` içinde çalışır. Bu dosya `public/index.php` tarafından engine.js ile worker.js birleştirilerek üretilir ve `CSP: default-src 'none'; script-src 'unsafe-eval'; connect-src 'none'; worker-src 'none'` başlığıyla sunulur. fetch, XHR, iç içe Worker, EventSource ve `import()` engellidir; bu, tarayıcıda kaçış denemeleriyle doğrulandı. Worker'ın `postMessage`'ı strateji kodundan gizlenir.
+- *XSS:* Parametreler worker'da yalnızca sayı ve mantıksal değer olarak dışarı çıkar ve öznitelikler sayıya zorlanır. Kayıtlı listede `trades` biçimlendirilir.
+- *Sanal portföy:* Emirler hesap satırı kilitlenerek (`FOR UPDATE`) işlemde yazılır. Fiyat kaynağı etiketi sütuna sığacak şekilde kısaltıldı.
+
 **Açık fikirler:** gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).

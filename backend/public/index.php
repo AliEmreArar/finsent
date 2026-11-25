@@ -23,6 +23,18 @@ use FinSent\Router;
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
+// The strategy sandbox: engine + worker in one script, so its CSP can forbid every script source
+// ('unsafe-eval' only: the engine compiles strategy code with new Function). No network, no
+// nested workers, no import() or importScripts from strategy code.
+if ($path === '/assets/strategy/sandbox.js') {
+    header('Content-Type: application/javascript; charset=utf-8');
+    header("Content-Security-Policy: default-src 'none'; script-src 'unsafe-eval'; connect-src 'none'; worker-src 'none'");
+    header('Cache-Control: no-cache');
+    $dir = __DIR__ . '/assets/strategy/';
+    echo file_get_contents($dir . 'engine.js'), "\n;\n", file_get_contents($dir . 'worker.js');
+    return;
+}
+
 if (!str_starts_with($path, '/api/')) {
     header('Content-Type: text/html; charset=utf-8');
     readfile(__DIR__ . '/app.html');

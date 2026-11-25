@@ -4,13 +4,20 @@
 // too long (an endless loop in the strategy).
 /* global importScripts, FinSentEngine */
 'use strict';
-importScripts('engine.js');
+// Served as /assets/strategy/sandbox.js: engine.js + this file in one script (public/index.php), under a
+// CSP with no 'self', so the strategy code cannot load any script or module. Loaded directly
+// (e.g. in tests) it falls back to importing the engine.
+if (typeof FinSentEngine === 'undefined') importScripts('engine.js');
 
-// network access is not part of the strategy API; block it so code stays a pure function of data
-self.fetch = undefined;
-self.XMLHttpRequest = undefined;
-self.WebSocket = undefined;
-self.importScripts = undefined;
+// Network access is not part of the strategy API. The CSP header served with this file (see
+// public/.htaccess) is the real barrier; removing the globals is defence in depth.
+for (const name of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'importScripts',
+  'caches', 'indexedDB', 'BroadcastChannel', 'WebTransport', 'navigator']) {
+  try { Object.defineProperty(self, name, { value: undefined, configurable: false, writable: false }); } catch { /* not present */ }
+}
+// keep our own messaging out of reach of the strategy code
+const post = self.postMessage.bind(self);
+try { Object.defineProperty(self, 'postMessage', { value: undefined, configurable: false, writable: false }); } catch { /* ignore */ }
 
 const E = FinSentEngine;
 
@@ -39,30 +46,35 @@ self.onmessage = (ev) => {
     if (type === 'inspect') {
       const s = E.compileStrategy(payload.code);
       const params = {};
-      for (const [k, spec] of Object.entries(s.params || {})) {
+      const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+      const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : null);
+      for (const [k, spec] of Object.entries(s.params || {}).slice(0, 40)) {
+        if (!/^[A-Za-z_$][\w$]{0,40}$/.test(k)) continue;
         const o = spec && typeof spec === 'object' ? spec : { default: spec };
-        params[k] = { label: o.label || k, default: o.default, min: o.min, max: o.max, step: o.step, options: o.options };
+        const def = typeof o.default === 'boolean' ? o.default : num(o.default);
+        if (def === undefined) continue;   // only numeric and boolean params become controls
+        params[k] = { label: str(o.label, 80) || k, default: def, min: num(o.min), max: num(o.max), step: num(o.step) };
       }
-      self.postMessage({ id, ok: true, result: { name: s.name || null, description: s.description || null, params } });
+      post({ id, ok: true, result: { name: str(s.name, 120), description: str(s.description, 600), params } });
     } else if (type === 'backtest') {
       const r = E.backtest(payload);
-      self.postMessage({ id, ok: true, result: slim(r) });
+      post({ id, ok: true, result: slim(r) });
     } else if (type === 'sweep') {
       let last = 0;
-      const r = E.sweep({ ...payload, onProgress: (f) => { if (f - last > 0.02 || f === 1) { last = f; self.postMessage({ id, progress: f }); } } });
-      self.postMessage({ id, ok: true, result: r });
+      const r = E.sweep({ ...payload, onProgress: (f) => { if (f - last > 0.02 || f === 1) { last = f; post({ id, progress: f }); } } });
+      post({ id, ok: true, result: r });
     } else if (type === 'rolling') {
       const { dates, equity, reference } = payload;
-      self.postMessage({ id, ok: true, result: { y1: E.rollingWindows(dates, equity, reference, 365), y3: E.rollingWindows(dates, equity, reference, 3 * 365) } });
+      post({ id, ok: true, result: { y1: E.rollingWindows(dates, equity, reference, 365), y3: E.rollingWindows(dates, equity, reference, 3 * 365) } });
     } else if (type === 'montecarlo') {
-      self.postMessage({ id, ok: true, result: E.monteCarlo(payload.equity, payload.options || {}) });
+      post({ id, ok: true, result: E.monteCarlo(payload.equity, payload.options || {}) });
     } else if (type === 'walkforward') {
-      const r = E.walkForward({ ...payload, onProgress: (f) => self.postMessage({ id, progress: f }) });
-      self.postMessage({ id, ok: true, result: r });
+      const r = E.walkForward({ ...payload, onProgress: (f) => post({ id, progress: f }) });
+      post({ id, ok: true, result: r });
     } else {
       throw new Error('unknown message type ' + type);
     }
   } catch (e) {
-    self.postMessage({ id, ok: false, error: errInfo(e) });
+    post({ id, ok: false, error: errInfo(e) });
   }
 };

@@ -239,7 +239,7 @@ test('signals placed on the last bar are reported as today\'s signals', () => {
   const s = makeSeries([1, 2, 3, 4]);
   const code = `const strategy = { onBar(ctx) { if (ctx.isLastBar) ctx.buy('A', { percent: 50, reason: 'sinyal' }); } };`;
   const r = E.backtest({ code, data: { A: s } });
-  assert.deepEqual(r.signals, [{ sym: 'A', side: 'buy', reason: 'sinyal', percent: 50 }]);
+  assert.deepEqual(r.signals, [{ sym: 'A', side: 'buy', reason: 'sinyal', percent: 50, targetPercent: null, shares: null, amount: null }]);
 });
 
 // ------------------------------------------------------------------ sweep / walk-forward
@@ -436,4 +436,66 @@ test('relative metrics: a 2x levered copy has beta 2 and correlation 1', () => {
   close(m.correlation, 1, 1e-9);
   assert.ok(Number.isFinite(m.alpha) && Number.isFinite(m.informationRatio));
   assert.equal(E.relativeMetrics(dates.slice(0, 5), a.slice(0, 5), b.slice(0, 5)), null);
+});
+
+// ------------------------------------------------------------------ regressions from the code review
+test('rebalance: target reductions run before target increases, so cash is not left idle', () => {
+  const data = { A: makeSeries(new Array(10).fill(100)), B: makeSeries(new Array(10).fill(100)) };
+  const code = `const strategy = { onBar(ctx) {
+    if (ctx.i === 0) ctx.targetPercent('A', 99);
+    if (ctx.i === 3) { ctx.targetPercent('B', 50); ctx.targetPercent('A', 49); }
+  } };`;
+  const r = E.backtest({ code, data, config: { initialCapital: 100000, commissionBps: 0, slippageBps: 0 } });
+  const pos = Object.fromEntries(r.openPositions.map((p) => [p.sym, p.shares]));
+  assert.equal(pos.B, 500);
+  assert.equal(pos.A, 490);
+  assert.ok(r.finalCash < 1100, `idle cash ${r.finalCash}`);
+});
+
+test('normPct: 1 means 1 %, fractions pass, stops >= 100 % are rejected, big targets allowed', () => {
+  assert.equal(E.normPct(1), 0.01);
+  assert.equal(E.normPct(0.05), 0.05);
+  assert.equal(E.normPct(8), 0.08);
+  assert.equal(E.normPct(100), null);
+  assert.equal(E.normPct(150, true), 1.5);
+  assert.equal(E.normPct(0), null);
+  assert.equal(E.normPct('x'), null);
+});
+
+test('a 1 % stop is honoured and setStop takes percents like buy()', () => {
+  const c = [100, 100, 100, 95, 90, 85];
+  const s = makeSeries(c);
+  const one = `const strategy = { onBar(ctx) { if (!ctx.state.d) { ctx.buy('A', { percent: 100, stopLoss: 1 }); ctx.state.d = 1; } } };`;
+  const r = E.backtest({ code: one, data: { A: s }, config: { commissionBps: 0, slippageBps: 0, adjustCorporateActions: false } });
+  assert.equal(r.trades[0]?.reason, 'zarar kes');
+  const viaSet = `const strategy = { onBar(ctx) { if (!ctx.state.d) { ctx.buy('A', { percent: 100 }); ctx.state.d = 1; } else if (ctx.position('A')) ctx.setStop('A', { stopLoss: 5 }); } };`;
+  const r2 = E.backtest({ code: viaSet, data: { A: s }, config: { commissionBps: 0, slippageBps: 0, adjustCorporateActions: false } });
+  assert.equal(r2.trades[0]?.reason, 'zarar kes');
+  close(r2.trades[0].exitPrice, 95);
+});
+
+test('riskPercent without a stop is skipped with a warning, never all-in', () => {
+  const s = makeSeries(new Array(10).fill(100));
+  const code = `const strategy = { onBar(ctx) { if (ctx.i === 0) ctx.buy('A', { riskPercent: 1 }); } };`;
+  const r = E.backtest({ code, data: { A: s } });
+  assert.equal(r.fills.length, 0);
+  assert.ok(r.warnings.some((w) => w.includes('riskPercent')));
+});
+
+test('strategies cannot mutate ta, and sweep runs do not share top-level state', () => {
+  const s = makeSeries(randomWalk(300, 2));
+  assert.throws(() => E.backtest({ code: `ta.sma = () => []; const strategy = { onBar() {} };`, data: { A: s } }));
+  assert.ok(E.ta.sma([1, 2, 3], 2).length === 3);
+  const code = `let runs = 0; const strategy = { params: { x: { default: 1, min: 1, max: 3, step: 1 } }, onBar(ctx) { if (ctx.i === 0) { runs++; if (runs === 1) ctx.buy('A', { percent: 100 }); } } };`;
+  const sw = E.sweep({ code, data: { A: s }, grid: { x: { min: 1, max: 3, step: 1 } } });
+  assert.ok(sw.rows.every((r) => r.trades === 0 && r.totalReturn !== 0), 'every combination should have bought');
+});
+
+test('fill=close still reports the last bar orders as signals', () => {
+  const s = makeSeries([1, 2, 3, 4]);
+  const code = `const strategy = { onBar(ctx) { if (ctx.isLastBar) ctx.targetPercent('A', 30, { reason: 'x' }); } };`;
+  const r = E.backtest({ code, data: { A: s }, config: { fill: 'close' } });
+  assert.equal(r.signals.length, 1);
+  assert.equal(r.signals[0].side, 'target');
+  assert.equal(r.signals[0].targetPercent, 30);
 });
