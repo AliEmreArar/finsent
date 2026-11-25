@@ -363,6 +363,7 @@ Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir 
 - "Tutarlılık" sekmesi (`engine.rollingWindows`): her günü başlangıç sayıp 1 ve 3 yıllık kayan pencerelerde al-tut'u geçme oranını, kârlı pencere oranını ve en kötü/ortanca/en iyi pencereyi gösterir. Kayan 1 yıllık getiri grafiği de var.
 - Dışa/içe aktarma: `.finsent.json` (`format: finsent-strategy`, kod + ayarlar) veya düz `.js` dosyası. Dosya adları ASCII'ye çevrilir; Chromium ASCII olmayan adları "download" olarak kaydedebiliyor.
 - Kayıtlı stratejiler sayfasında birden fazla strateji seçilip ortak bir dönemde yan yana test edilir (logaritmik ölçekte, 100'e endekslenmiş eğriler).
+- Zaman dilimi: günlük / haftalık / aylık (`engine.aggregateBars`, `config.timeframe`, `ctx.timeframe`). Haftalık mum haftanın son işlem günüyle etiketlenir, böylece emirler dönem kapandıktan sonra gerçekleşir. Grok şeması `timeframe` alanı döndürür. Veri ucu `warmup_days` ile daha uzun ısınma geçmişi verir (haftalık 1800, aylık 4500 gün). Düşüş süresi takvim günüyle ölçülür.
 - Kod kontrolü ve backtest ayrı worker'larda çalışır; yazarken yapılan kontrol uzun bir taramayı öldürmez.
 
 **Açık fikirler:** gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).
