@@ -14,6 +14,7 @@ use FinSent\Controllers\OverviewController;
 use FinSent\Controllers\PairController;
 use FinSent\Controllers\PatternController;
 use FinSent\Controllers\SocialController;
+use FinSent\Controllers\StrategyController;
 use FinSent\Http;
 use FinSent\HttpError;
 use FinSent\Router;
@@ -68,6 +69,17 @@ $router->post('/api/alerts/seen', [AlertController::class, 'markSeen']);
 $router->post('/api/alerts/{id}/delete', [AlertController::class, 'delete']);
 $router->post('/api/analyze', [AnalysisController::class, 'analyze']);
 $router->post('/api/insights/{symbol}', [AnalysisController::class, 'insight']);
+// strategy lab (backtests run in the browser; these serve data, Grok and saved strategies)
+$router->get('/api/strategy/status', [StrategyController::class, 'status']);
+$router->get('/api/strategy/data', [StrategyController::class, 'data']);
+$router->get('/api/strategy/universe', [StrategyController::class, 'universe']);
+$router->post('/api/strategy/generate', [StrategyController::class, 'generate']);
+$router->post('/api/strategy/fix', [StrategyController::class, 'fix']);
+$router->post('/api/strategy/review', [StrategyController::class, 'review']);
+$router->get('/api/strategies', [StrategyController::class, 'list']);
+$router->post('/api/strategies', [StrategyController::class, 'save']);
+$router->get('/api/strategies/{id}', [StrategyController::class, 'show']);
+$router->post('/api/strategies/{id}/delete', [StrategyController::class, 'delete']);
 
 try {
     $router->dispatch($method, rtrim($path, '/') ?: '/');

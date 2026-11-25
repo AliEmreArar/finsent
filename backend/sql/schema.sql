@@ -224,3 +224,17 @@ CREATE TABLE IF NOT EXISTS drawings (
     payload     JSON        NOT NULL,
     updated_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
+
+-- Strategy lab: user / Grok-written strategies (JavaScript run in the browser) with their settings
+-- and the summary of the last backtest.
+CREATE TABLE IF NOT EXISTS strategies (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(120) NOT NULL,
+    description TEXT         NULL,
+    prompt      TEXT         NULL,
+    code        MEDIUMTEXT   NOT NULL,
+    config      JSON         NOT NULL,
+    last_result JSON         NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
