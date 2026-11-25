@@ -163,6 +163,17 @@ Holdout on the last year (never trained on):
 
 **Reading the results:** ranking stocks against each other works consistently. Predicting the absolute direction of a single stock stays close to a coin flip, and the UI says so.
 
+## Strategy lab (`#/strateji`)
+
+Describe a trading idea in plain Turkish ("RSI 30'un altına inince al, 70 üstünde sat, %8 zarar kes"). Grok turns it into JavaScript for FinSent's strategy API, the code appears in an editor you can change, and the strategy is backtested on the historical daily data with virtual money.
+
+- **Where it runs:** in the browser, inside a Web Worker without network access (`backend/public/assets/strategy/`). Strategy code never runs on the server.
+- **Grok:** `POST /api/strategy/generate` writes or edits the code from the conversation (structured output, `XAI_STRATEGY_MODEL`, default `XAI_MODEL`), `/fix` repairs code that failed, `/review` comments on the results. Without `XAI_API_KEY`, a rule-based Turkish parser picks the closest of 9 built-in templates and fills in the numbers, and the review is rule-based.
+- **Simulation:** signals at the close, fills at the next open, commission and slippage per side, whole lots, stop-loss / take-profit / trailing stops, long-only. Bonus issues and splits are back-adjusted: BIST's daily limit is ±10%, so a larger overnight gap is treated as a corporate action. KAP sentiment is available per bar without look-ahead.
+- **Settings:** stocks (or "most liquid N as of the start date", which avoids survivorship bias), period, capital, costs, TL/USD, benchmark (BIST 100, gram gold, USD) and sliders built from the strategy's `params`.
+- **Results:** CAGR, Sharpe, Sortino, max drawdown and its length, win rate, profit factor and exposure, each versus buy-and-hold and the benchmark. Also equity and drawdown curves, trades on the price chart, today's signals, the trade list with CSV export, a monthly heatmap, a parameter sweep heatmap with an overfitting check, an in-sample/out-of-sample test, and saved strategies (`strategies` table, `#/stratejiler`).
+- **Tests:** `node --test 'backend/tests/js/*.test.js'` and `php backend/tests/php/run.php`.
+
 ## Grok agent (right-hand panel)
 
 Click **Asistan** (or press Ctrl+K) to open a chat with a Grok agent. The agent knows what you are looking at: the page, stock, candle size and currency.
@@ -362,6 +373,10 @@ python -m venv .venv && .venv/Scripts/pip install -e "pipeline[test]"
 | `GET /api/pipeline` | Pipeline runs, DQ reports and the latest MLflow evaluation |
 | `POST /api/analyze` `{text, symbol?}` | Real-time sentiment |
 | `POST /api/insights/{symbol}` | LLM (or rule-based) interpretation of patterns and disclosures |
+| `GET /api/strategy/data?symbols=A,B&from&to&currency&benchmark` | Columnar daily bars (+ warm-up), benchmark and daily KAP sentiment for the strategy lab |
+| `GET /api/strategy/universe?n=20&as_of=YYYY-MM-DD` | Most liquid stocks as of a date |
+| `POST /api/strategy/generate` / `fix` / `review` | Grok strategy coder, fixer and results review |
+| `GET/POST /api/strategies`, `GET /api/strategies/{id}`, `POST /api/strategies/{id}/delete` | Saved strategies |
 
 ## Layout
 
