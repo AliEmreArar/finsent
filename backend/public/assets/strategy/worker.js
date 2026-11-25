@@ -51,6 +51,9 @@ self.onmessage = (ev) => {
       let last = 0;
       const r = E.sweep({ ...payload, onProgress: (f) => { if (f - last > 0.02 || f === 1) { last = f; self.postMessage({ id, progress: f }); } } });
       self.postMessage({ id, ok: true, result: r });
+    } else if (type === 'rolling') {
+      const { dates, equity, reference } = payload;
+      self.postMessage({ id, ok: true, result: { y1: E.rollingWindows(dates, equity, reference, 365), y3: E.rollingWindows(dates, equity, reference, 3 * 365) } });
     } else if (type === 'montecarlo') {
       self.postMessage({ id, ok: true, result: E.monteCarlo(payload.equity, payload.options || {}) });
     } else if (type === 'walkforward') {

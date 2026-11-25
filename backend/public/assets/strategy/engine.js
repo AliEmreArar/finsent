@@ -800,5 +800,31 @@
     };
   }
 
-  return { ta, backtest, monteCarlo, compileStrategy, resolveParams, computeMetrics, adjustCorporateActions, alignSeries, sweep, walkForward, gridValues, periodReturns, drawdownSeries, StrategyError, DEFAULTS };
+  // ------------------------------------------------------------------ rolling windows
+  // Return of every window of `days` calendar days (one per bar start), for the strategy and a
+  // reference curve: how often the strategy was ahead, and the worst / best window.
+  function rollingWindows(dates, eq, ref, days = 365) {
+    const t = dates.map((d) => Date.parse(d));
+    const rows = [];
+    let j = 0;
+    for (let i = 0; i < dates.length; i++) {
+      while (j < dates.length && t[j] - t[i] < days * 864e5) j++;
+      if (j >= dates.length) break;
+      const a = eq[j] / eq[i] - 1;
+      const b = ref ? ref[j] / ref[i] - 1 : null;
+      rows.push({ start: dates[i], end: dates[j], strategy: a, reference: b });
+    }
+    if (!rows.length) return null;
+    const s = rows.map((r) => r.strategy).sort((x, y) => x - y);
+    const q = (p) => s[Math.min(s.length - 1, Math.floor(p * (s.length - 1)))];
+    return {
+      days, windows: rows.length,
+      beatRate: ref ? rows.filter((r) => r.strategy > r.reference).length / rows.length : null,
+      positiveRate: rows.filter((r) => r.strategy > 0).length / rows.length,
+      worst: s[0], median: q(0.5), best: s[s.length - 1],
+      rows,
+    };
+  }
+
+  return { ta, backtest, monteCarlo, rollingWindows, compileStrategy, resolveParams, computeMetrics, adjustCorporateActions, alignSeries, sweep, walkForward, gridValues, periodReturns, drawdownSeries, StrategyError, DEFAULTS };
 });

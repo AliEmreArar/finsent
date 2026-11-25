@@ -372,3 +372,14 @@ test('Sharpe uses excess returns over the deposit rate: pure deposit has ~0 Shar
   const b = E.backtest({ code: BUY_FIRST_DAY, data: { A: up }, config: { cashRatePct: 40 } });
   assert.ok(b.metrics.sharpe < a.metrics.sharpe);
 });
+
+test('rollingWindows: counts windows and beat rate against a reference', () => {
+  const st = makeSeries(new Array(600).fill(0).map((_, i) => 100 * Math.pow(1.001, i)));
+  const ref = st.close.map((_, i) => 100 * Math.pow(1.0005, i));
+  const r = E.rollingWindows(st.date, st.close, ref, 365);
+  assert.ok(r.windows > 300);
+  assert.equal(r.beatRate, 1);
+  assert.equal(r.positiveRate, 1);
+  assert.ok(r.worst <= r.median && r.median <= r.best);
+  assert.equal(E.rollingWindows(st.date.slice(0, 50), st.close.slice(0, 50), null, 365), null);
+});

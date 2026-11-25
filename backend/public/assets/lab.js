@@ -9,6 +9,9 @@
   const allSyms = () => (typeof SYMBOLS !== 'undefined' && Array.isArray(SYMBOLS) ? SYMBOLS : []);
   const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
+  // ASCII file names: some browsers drop a non-ASCII download name and save as "download"
+  const TR = { ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u', Ç: 'C', Ğ: 'G', İ: 'I', Ö: 'O', Ş: 'S', Ü: 'U' };
+  const fileSlug = (s) => (String(s || 'strateji').replace(/[çğıöşüÇĞİÖŞÜ]/g, (c) => TR[c]).replace(/[^A-Za-z0-9-]+/g, '_').replace(/^_+|_+$/g, '') || 'strateji').slice(0, 80);
 
   // ------------------------------------------------------------------ worker
   // Two workers: 'main' for backtests / sweeps, 'inspect' for the quick compile check that runs
@@ -110,6 +113,8 @@
               <button class="btn sm" id="lab-check" title="Derle ve parametreleri oku">Kontrol et</button>
               <button class="btn sm" id="lab-fix" style="display:none" title="Hatayı Grok düzeltsin">Grok ile düzelt</button>
               <button class="btn sm" id="lab-copy" title="Kodu kopyala">Kopyala</button>
+              <button class="btn sm" id="lab-export" title="Stratejiyi ayarlarıyla dosyaya kaydet">Dışa aktar</button>
+              <label class="btn sm" title="Dışa aktarılmış .json veya .js dosyasını yükle">İçe aktar<input type="file" id="lab-import" accept=".json,.js,.txt,application/json,text/javascript" hidden></label>
               <button class="btn sm" id="lab-help-btn" title="Strateji API'si">API</button>
             </div></div>
           <div class="lab-strat-name"><input class="field" id="lab-name" placeholder="Strateji adı"><span class="muted small" id="lab-desc"></span></div>
@@ -165,6 +170,8 @@
     $('#lab-fix').onclick = fixWithGrok;
     $('#lab-copy').onclick = () => { navigator.clipboard?.writeText(getCode()); toast('Kod kopyalandı'); };
     $('#lab-help-btn').onclick = toggleHelp;
+    $('#lab-export').onclick = exportStrategy;
+    $('#lab-import').onchange = (e) => { const f = e.target.files[0]; if (f) importStrategy(f); e.target.value = ''; };
     $('#lab-run').onclick = runBacktest;
     $('#lab-save').onclick = saveStrategy;
     $('#lab-new').onclick = () => {
@@ -552,7 +559,7 @@
           ${kpi('Sharpe', ratio(m.sharpe), `Al-tut ${ratio(bh.sharpe)} · Sortino ${ratio(m.sortino)}`)}
           ${kpi('İşlemler', num(m.trades, 0), m.trades ? `Kazanma %${num(m.winRate * 100, 0)} · ort. ${pct(m.avgTrade, 1)}` : 'Kapanmış işlem yok')}
         </div>
-        <div class="seg lab-tabs" id="lab-tabs"><button data-t="sum" class="on">Özet</button><button data-t="trades">İşlemler</button><button data-t="months">Aylık / yıllık</button><button data-t="opt">Optimizasyon</button><button data-t="wf">Eğitim / test</button><button data-t="mc">Risk (Monte Carlo)</button><button data-t="log">Günlük</button></div>
+        <div class="seg lab-tabs" id="lab-tabs"><button data-t="sum" class="on">Özet</button><button data-t="trades">İşlemler</button><button data-t="months">Aylık / yıllık</button><button data-t="opt">Optimizasyon</button><button data-t="wf">Eğitim / test</button><button data-t="roll">Tutarlılık</button><button data-t="mc">Risk (Monte Carlo)</button><button data-t="log">Günlük</button></div>
         <div id="lab-tab"></div>
       </div>
       <div class="card reveal" id="lab-review-card" style="margin-top:16px;display:none"></div>`;
@@ -572,6 +579,7 @@
     if (t === 'opt') return tabOptimize(box);
     if (t === 'wf') return tabWalkForward(box);
     if (t === 'mc') return tabMonteCarlo(r, box);
+    if (t === 'roll') return tabRolling(r, box);
     if (t === 'log') return tabLog(r, box);
   }
 
@@ -903,6 +911,32 @@
     };
   }
 
+  async function tabRolling(r, box) {
+    box.innerHTML = '<div class="empty"><span class="spinner"></span> Kayan pencereler hesaplanıyor…</div>';
+    let res;
+    try { res = await run('rolling', { dates: r.dates, equity: r.equity, reference: r.buyHold.equity }, { timeoutMs: 30000 }); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+    const block = (w, label) => !w ? `<div class="lab-wf"><div class="note">${label}</div><div class="muted small" style="margin-top:8px">Bu pencere için dönem çok kısa.</div></div>` : `
+      <div class="lab-wf"><div class="note">${label} · ${num(w.windows, 0)} pencere</div>
+        <div class="lab-wf-v ${w.beatRate >= 0.5 ? 'up' : 'down'}">Al-tut'u geçen pencere: %${num(w.beatRate * 100, 0)}</div>
+        <dl class="kv lab-kv"><dt>Kârlı pencere oranı</dt><dd>%${num(w.positiveRate * 100, 0)}</dd><dt>En kötü pencere</dt><dd class="${dirCls(w.worst)}">${pct(w.worst, 1)}</dd>
+          <dt>Ortanca pencere</dt><dd class="${dirCls(w.median)}">${pct(w.median, 1)}</dd><dt>En iyi pencere</dt><dd class="${dirCls(w.best)}">${pct(w.best, 1)}</dd></dl></div>`;
+    box.innerHTML = `<p class="muted small" style="margin-top:0">Test dönemindeki her günü başlangıç kabul edip sonraki 1 ve 3 yılın getirisine bakar. Stratejiye "yanlış zamanda" başlayan biri ne yaşardı? Tek bir şanslı dönemde kazanan strateji burada ortaya çıkar.</p>
+      <div class="grid g-2">${block(res.y1, '1 yıllık pencereler')}${block(res.y3, '3 yıllık pencereler')}</div>
+      ${res.y1 ? `<div class="note" style="margin:16px 0 6px">Kayan 1 yıllık getiri</div><div style="height:240px"><canvas id="roll-chart"></canvas></div>` : ''}`;
+    if (!res.y1) return;
+    const C = COLORS();
+    const rows = res.y1.rows;
+    const step = Math.max(1, Math.floor(rows.length / 800));
+    const pick = rows.filter((_, i) => i % step === 0);
+    chart('roll-chart', { type: 'line', data: { labels: pick.map((x) => x.end), datasets: [
+      { label: 'Strateji', data: pick.map((x) => x.strategy * 100), borderColor: C.strat, borderWidth: 1.8, pointRadius: 0, tension: 0, fill: false },
+      { label: 'Al-tut', data: pick.map((x) => x.reference * 100), borderColor: C.bh, borderWidth: 1.2, borderDash: [4, 3], pointRadius: 0, tension: 0, fill: false }] },
+      options: { maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: true, labels: { boxWidth: 10, boxHeight: 2 } }, tooltip: { ...tooltip, displayColors: true, callbacks: { title: (it) => `${fdate(pick[it[0].dataIndex].start)} → ${fdate(it[0].label)}`, label: (c) => ` ${c.dataset.label}: %${num(c.parsed.y, 1)}` } } },
+        scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8, maxRotation: 0, callback(v) { return String(this.getLabelForValue(v)).slice(0, 7); } } },
+          y: { position: 'right', grid: { color: 'rgba(255,255,255,.04)' }, ticks: { callback: (v) => `%${v}` } } } } });
+  }
+
   async function tabMonteCarlo(r, box) {
     box.innerHTML = '<div class="empty"><span class="spinner"></span> 1.000 alternatif geçmiş üretiliyor…</div>';
     let mc;
@@ -949,8 +983,8 @@
     const blob = new Blob(['﻿' + head + body], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${(S.name || 'strateji').replace(/[^\wçğıöşüÇĞİÖŞÜ-]+/g, '_')}_islemler.csv`;
-    a.click();
+    a.download = `${fileSlug(S.name)}_islemler.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
@@ -984,6 +1018,35 @@
         </div><p class="muted small" style="margin:10px 0 0">Bir öneriye tıklarsan Grok'a stratejiyi o yönde değiştirmesini söyleyen bir istek hazırlanır. Yatırım tavsiyesi değildir.</p>`;
       $$('.lab-sugg').forEach((b) => (b.onclick = () => { $('#lab-prompt').value = b.textContent; $('#lab-prompt').focus(); window.scrollTo({ top: 0, behavior: 'smooth' }); }));
     } catch (e) { card.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+
+  // ------------------------------------------------------------------ export / import
+  function exportStrategy() {
+    const doc = { format: 'finsent-strategy', version: 1, exported_at: new Date().toISOString(), name: S.name, description: meta?.description || null,
+      prompt: S.prompt || null, code: getCode(), config: { ...S.config } };
+    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${fileSlug(S.name)}.finsent.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  async function importStrategy(file) {
+    if (file.size > 500000) { toast('Dosya çok büyük'); return; }
+    const text = await file.text();
+    let doc = null;
+    try { doc = JSON.parse(text); } catch { /* plain code */ }
+    if (doc && typeof doc === 'object') {
+      if (doc.format !== 'finsent-strategy' || typeof doc.code !== 'string') { toast('Tanınmayan dosya biçimi'); return; }
+      S = { ...defaultState(), name: String(doc.name || 'İçe aktarılan strateji').slice(0, 120), prompt: String(doc.prompt || ''), code: doc.code, chat: [],
+        config: { ...defaultState().config, ...(doc.config && typeof doc.config === 'object' ? doc.config : {}) } };
+      S.config.symbols = (Array.isArray(S.config.symbols) ? S.config.symbols : []).map(String).filter((x) => /^[A-Z0-9]{2,12}$/.test(x)).slice(0, 40);
+    } else {
+      S.id = null; S.code = text; S.name = file.name.replace(/\.(js|txt)$/i, '');
+    }
+    setCode(S.code); $('#lab-name').value = S.name;
+    bindSettings(); renderSymbols(); renderChat(); saveDraft();
+    if (await inspect(false)) toast('Strateji içe aktarıldı. Kaydetmek için "Kaydet"e bas.');
   }
 
   // ------------------------------------------------------------------ save / load

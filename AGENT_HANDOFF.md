@@ -359,4 +359,10 @@ Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir 
 - Yeni ajan araçları: `open_strategy_lab` (NDJSON `type: lab` olayı; tarayıcı `#/strateji`'ye gider, açıklamayı koda döktürür ve test eder), `get_saved_strategies`, `get_paper_portfolio`.
 - Asistan → laboratuvar akışı sahte bir xAI sunucusuyla uçtan uca test edildi.
 
-**Açık fikirler:** kayıtlı stratejileri aynı grafikte karşılaştırma, gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).
+**Ek özellikler (2. tur):**
+- "Tutarlılık" sekmesi (`engine.rollingWindows`): her günü başlangıç sayıp 1 ve 3 yıllık kayan pencerelerde al-tut'u geçme oranını, kârlı pencere oranını ve en kötü/ortanca/en iyi pencereyi gösterir. Kayan 1 yıllık getiri grafiği de var.
+- Dışa/içe aktarma: `.finsent.json` (`format: finsent-strategy`, kod + ayarlar) veya düz `.js` dosyası. Dosya adları ASCII'ye çevrilir; Chromium ASCII olmayan adları "download" olarak kaydedebiliyor.
+- Kayıtlı stratejiler sayfasında birden fazla strateji seçilip ortak bir dönemde yan yana test edilir (logaritmik ölçekte, 100'e endekslenmiş eğriler).
+- Kod kontrolü ve backtest ayrı worker'larda çalışır; yazarken yapılan kontrol uzun bir taramayı öldürmez.
+
+**Açık fikirler:** gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).
