@@ -486,8 +486,7 @@
   }
 
   // ------------------------------------------------------------------ data + run
-  async function loadData() {
-    const c = S.config;
+  async function loadData(c = S.config) {
     if (!c.symbols.length) throw new Error('En az bir sembol ekle.');
     const key = [c.symbols.join(','), c.from, c.to, c.currency, c.benchmark].join('|');
     if (dataCache.has(key)) return dataCache.get(key);
@@ -498,8 +497,7 @@
     return d;
   }
 
-  function engineConfig(data) {
-    const c = S.config;
+  function engineConfig(data, c = S.config) {
     return { initialCapital: c.initialCapital, commissionBps: c.commissionBps, slippageBps: c.slippageBps, fill: c.fill,
       adjustCorporateActions: c.adjustCorporateActions, startDate: data.from, cashRatePct: c.currency === 'TRY' ? (c.cashRatePct || 0) : 0 };
   }
@@ -1013,23 +1011,76 @@
 
   // ------------------------------------------------------------------ saved list page
   window.pageStrategies = async function pageStrategies(v) {
-    v.innerHTML = `<div class="page-head"><div><h1>Kayıtlı stratejiler</h1><div class="sub">Son test sonuçlarıyla birlikte. Karşılaştırmak için aynı dönemde test etmeyi unutma.</div></div>
-      <a class="btn primary" href="#/strateji">Laboratuvara git</a></div><div class="card" id="sl-list">${skel(240)}</div>`;
+    v.innerHTML = `<div class="page-head"><div><h1>Kayıtlı stratejiler</h1><div class="sub">Birkaçını seçip aynı dönemde yan yana test edebilirsin.</div></div>
+      <a class="btn primary" href="#/strateji">Laboratuvara git</a></div><div class="card" id="sl-list">${skel(240)}</div>
+      <div class="card" id="sl-cmp" style="margin-top:16px;display:none"></div>`;
     const { strategies } = await api('/strategies');
     const box = $('#sl-list');
     if (!strategies.length) { box.innerHTML = '<div class="empty">Henüz kayıtlı strateji yok. Laboratuvarda bir strateji test edip "Kaydet"e bas.</div>'; return; }
-    box.innerHTML = `<div class="tbl-wrap"><table class="tbl"><tr><th>Strateji</th><th>Semboller</th><th>Dönem</th><th>Yıllık</th><th>Al-tut</th><th>Düşüş</th><th>Sharpe</th><th>İşlem</th><th></th><th></th></tr>
-      ${strategies.map((s) => { const r = s.last_result || {}; const c = s.config || {};
-        return `<tr><td><a href="#/strateji/${s.id}"><b>${esc(s.name)}</b></a><div class="muted small clamp">${esc(s.description || '')}</div></td>
+    box.innerHTML = `<div class="toolbar" style="margin:0 0 12px"><span class="muted small">Karşılaştırma dönemi</span>
+        <input type="date" class="field sm" id="sl-from" value="${yearsAgo(5)}"><span class="muted">→</span><input type="date" class="field sm" id="sl-to" value="${today}">
+        <button class="btn sm primary" id="sl-go" disabled>Seçilenleri karşılaştır</button><span class="muted small" id="sl-st"></span></div>
+      <div class="tbl-wrap"><table class="tbl"><tr><th></th><th>Strateji</th><th>Semboller</th><th>Dönem</th><th>Yıllık</th><th>Al-tut</th><th>Düşüş</th><th>Sharpe</th><th>İşlem</th><th></th><th></th></tr>
+      ${strategies.map((st) => { const r = st.last_result || {}; const c = st.config || {};
+        return `<tr><td><input type="checkbox" class="sl-pick" value="${st.id}" style="accent-color:var(--accent)"></td><td><a href="#/strateji/${st.id}"><b>${esc(st.name)}</b></a><div class="muted small clamp">${esc(st.description || '')}</div></td>
           <td class="small">${esc((c.symbols || []).slice(0, 5).join(', '))}${(c.symbols || []).length > 5 ? ` +${c.symbols.length - 5}` : ''}</td>
           <td class="small muted">${r.from ? `${fdate(r.from)} – ${fdate(r.to)}` : '–'}</td>
           <td class="num ${dirCls(r.cagr)}">${pct(r.cagr, 1)}</td><td class="num muted">${pct(r.buyHoldCagr, 1)}</td><td class="num down">${pct(r.maxDrawdown, 1)}</td>
           <td class="num">${ratio(r.sharpe)}</td><td class="num">${r.trades ?? '–'}</td><td>${r.spark ? spark(r.spark, 90, 26) : ''}</td>
-          <td><button class="linkbtn sl-del" data-id="${s.id}" title="Sil">Sil</button></td></tr>`; }).join('')}</table></div>`;
+          <td><button class="linkbtn sl-del" data-id="${st.id}" title="Sil">Sil</button></td></tr>`; }).join('')}</table></div>`;
+    const picks = () => $$('.sl-pick').filter((x) => x.checked).map((x) => Number(x.value));
+    $$('.sl-pick').forEach((x) => (x.onchange = () => { $('#sl-go').disabled = picks().length < 1; }));
     $$('.sl-del').forEach((b) => (b.onclick = async () => {
       if (!confirm('Strateji silinsin mi?')) return;
       await api(`/strategies/${b.dataset.id}/delete`, { method: 'POST', body: '{}' });
       window.pageStrategies(v);
     }));
+    $('#sl-go').onclick = () => compare(strategies.filter((x) => picks().includes(x.id)), $('#sl-from').value, $('#sl-to').value);
   };
+
+  // runs each picked strategy with its own stocks, parameters and costs, over one common period
+  async function compare(list, from, to) {
+    const out = $('#sl-cmp'), st = $('#sl-st');
+    out.style.display = 'block';
+    out.innerHTML = `<div class="empty"><span class="spinner"></span> ${list.length} strateji test ediliyor…</div>`;
+    const rows = [];
+    for (const [k, item] of list.entries()) {
+      st.textContent = `${k + 1}/${list.length}: ${item.name}`;
+      try {
+        const full = await api(`/strategies/${item.id}`);
+        const c = { ...defaultState().config, ...(full.config || {}), from, to };
+        const data = await loadData(c);
+        const r = await run('backtest', { code: full.code, data: data.series, params: c.params || {}, config: engineConfig(data, c), benchmark: data.benchmark }, { timeoutMs: 60000 });
+        rows.push({ name: full.name, r, c });
+      } catch (e) { rows.push({ name: item.name, error: e.message }); }
+    }
+    st.textContent = '';
+    const ok = rows.filter((x) => x.r);
+    const palette = [css('--accent'), '#d8d6cf', '#7fbf8f', '#e08f6a', '#a3a29d', '#c9a227', '#6e9c87', '#b5655a'];
+    const bm = ok.find((x) => x.r.benchmark)?.r.benchmark;
+    out.innerHTML = `<div class="card-head"><h2>Karşılaştırma · ${fdate(from)} – ${fdate(to)}</h2><span class="hint">her strateji kendi hisseleri, parametreleri ve maliyetleriyle</span></div>
+      <div class="chart-legend" style="position:static;margin-bottom:8px">${ok.map((x, i) => `<span><i class="line-key" style="background:${palette[i % palette.length]}"></i>${esc(x.name)}</span>`).join('')}${bm ? '<span><i class="line-key" style="background:#5a5955"></i>BIST 100</span>' : ''}</div>
+      <div style="height:300px"><canvas id="sl-chart"></canvas></div>
+      <div class="tbl-wrap" style="margin-top:14px"><table class="tbl"><tr><th>Strateji</th><th>Toplam</th><th>Yıllık</th><th>Al-tut yıllık</th><th>Düşüş</th><th>Sharpe</th><th>Sortino</th><th>İşlem</th><th>Kazanma</th><th>Piyasada</th></tr>
+        ${rows.map((x) => x.error ? `<tr><td><b>${esc(x.name)}</b></td><td colspan="9" class="down small">${esc(x.error)}</td></tr>` : (() => { const m = x.r.metrics;
+          return `<tr><td><b>${esc(x.name)}</b><div class="muted small">${esc(x.r.symbols.slice(0, 4).join(', '))}${x.r.symbols.length > 4 ? '…' : ''}</div></td><td class="num ${dirCls(m.totalReturn)}">${pct(m.totalReturn, 1)}</td>
+            <td class="num ${dirCls(m.cagr)}"><b>${pct(m.cagr, 1)}</b></td><td class="num muted">${pct(x.r.buyHold.metrics.cagr, 1)}</td><td class="num down">${pct(m.maxDrawdown, 1)}</td>
+            <td class="num">${ratio(m.sharpe)}</td><td class="num">${ratio(m.sortino)}</td><td class="num">${m.trades}</td><td class="num">${m.winRate !== null ? `%${num(m.winRate * 100, 0)}` : '–'}</td>
+            <td class="num">${m.exposure !== null ? `%${num(m.exposure * 100, 0)}` : '–'}</td></tr>`; })()).join('')}</table></div>
+      <p class="muted small">Eğriler aynı başlangıç sermayesine göre ölçeklendi. Farklı hisse sepetleri karşılaştırılıyorsa fark stratejiden çok hisse seçiminden gelebilir.</p>`;
+    if (!ok.length) return;
+    // union calendar, each curve rebased to 100
+    const dates = [...new Set(ok.flatMap((x) => x.r.dates))].sort();
+    const series = ok.map((x) => { const m = new Map(x.r.dates.map((d, i) => [d, x.r.equity[i]])); let last = null; const base = x.r.equity[0];
+      return dates.map((d) => { if (m.has(d)) last = m.get(d); return last === null ? null : (last / base) * 100; }); });
+    const ds = series.map((data, i) => ({ label: ok[i].name, data, borderColor: palette[i % palette.length], borderWidth: i === 0 ? 2 : 1.5, pointRadius: 0, fill: false, tension: 0, spanGaps: true }));
+    if (bm) { const bmap = new Map(); const ref = ok.find((x) => x.r.benchmark).r; ref.dates.forEach((d, i) => bmap.set(d, ref.benchmark.equity[i]));
+      let last = null; const base = ref.benchmark.equity[0];
+      ds.push({ label: 'BIST 100', data: dates.map((d) => { if (bmap.has(d)) last = bmap.get(d); return last === null ? null : (last / base) * 100; }), borderColor: '#5a5955', borderWidth: 1.2, borderDash: [4, 3], pointRadius: 0, fill: false, tension: 0, spanGaps: true }); }
+    chart('sl-chart', { type: 'line', data: { labels: dates, datasets: ds },
+      options: { maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { ...tooltip, displayColors: true, callbacks: { title: (it) => fdate(it[0].label), label: (c) => ` ${c.dataset.label}: ${num(c.parsed.y, 1)}` } } },
+        scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8, maxRotation: 0, callback(v) { return String(this.getLabelForValue(v)).slice(0, 7); } } },
+          y: { type: 'logarithmic', position: 'right', grid: { color: 'rgba(255,255,255,.04)' }, ticks: { maxTicksLimit: 6, callback: (x) => num(x, 0) } } } } });
+  }
 })();
