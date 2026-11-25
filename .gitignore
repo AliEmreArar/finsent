@@ -26,3 +26,4 @@ airflow/logs/
 # snapshot builds / downloads
 data/snapshot/
 data/snapshot_release/
+backend/composer.lock
