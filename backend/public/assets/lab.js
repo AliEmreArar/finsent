@@ -288,7 +288,7 @@
           <dt><code>indicators(s, p, ta)</code></dt><dd>Her hisse için bir kez çalışır. <code>s.close</code>, <code>s.high</code>, <code>s.low</code>, <code>s.volume</code>, <code>s.sentiment</code> dizileriyle gösterge dizileri döndür.</dd>
           <dt><code>onBar(ctx, p)</code></dt><dd>Her günün kapanışında çalışır. Emirler ertesi günün açılışında gerçekleşir (geleceği görme yok).</dd>
           <dt>Okuma</dt><dd><code>ctx.symbols, ctx.date, ctx.cash, ctx.equity, ctx.close(sym), ctx.bar(sym, önceki=0), ctx.ind(sym,'ad'), ctx.sentiment(sym), ctx.position(sym), ctx.positions(), ctx.state</code></dd>
-          <dt>Emir</dt><dd><code>ctx.buy(sym, { percent | amount | shares, stopLoss, takeProfit, trailingStop, reason })</code>, <code>ctx.sell(sym, { percent })</code>, <code>ctx.targetPercent(sym, 30)</code>, <code>ctx.closeAll()</code>, <code>ctx.log(...)</code></dd>
+          <dt>Emir</dt><dd><code>ctx.buy(sym, { percent | amount | shares | riskPercent, stopLoss, takeProfit, trailingStop, reason })</code> (<code>riskPercent: 1, stopLoss: 0.05</code> = stop olursa sermayenin %1'i kaybedilecek büyüklük), <code>ctx.sell(sym, { percent })</code>, <code>ctx.targetPercent(sym, 30)</code>, <code>ctx.closeAll()</code>, <code>ctx.log(...)</code></dd>
           <dt><code>ta</code></dt><dd>sma, ema, rsi, macd, bollinger, atr, stochastic, adx, obv, highest, lowest, roc, stdev, zscore, ref, crossover, crossunder, isNum</dd>
         </dl>
         <p class="muted small" style="margin:8px 0 0">Kod tarayıcında, sayfadan yalıtılmış bir Web Worker içinde çalışır; ağ erişimi kapalıdır.</p>`;
@@ -618,6 +618,10 @@
             <dt>Ödenen komisyon</dt><dd>${fmtMoney(r.totalCommission)}</dd>
             ${r.totalInterest ? `<dt>Nakitte kazanılan faiz</dt><dd>${fmtMoney(r.totalInterest)}</dd>` : ''}
             <dt>Süre</dt><dd>${num(m.years, 1)} yıl</dd>
+            ${r.relative ? `<dt title="1 = endeksle aynı oynaklık; 0 = endeksten bağımsız">Beta (${esc(r.benchmark.name)})</dt><dd>${ratio(r.relative.beta)}</dd>
+            <dt title="Endeks riskinin açıklayamadığı yıllık getiri">Alfa (yıllık)</dt><dd class="${dirCls(r.relative.alpha)}">${pct(r.relative.alpha, 1)}</dd>
+            <dt>Endeksle korelasyon</dt><dd>${ratio(r.relative.correlation)}</dd>
+            <dt title="Endeksi geçme getirisinin, ondan sapma riskine oranı">Bilgi oranı</dt><dd>${ratio(r.relative.informationRatio)}</dd>` : ''}
           </dl>
           ${Object.keys(r.corporateActions).length ? `<p class="muted small" style="margin:10px 0 0">Sermaye işlemi düzeltmesi: ${Object.entries(r.corporateActions).map(([s, ev]) => `${esc(s)} (${ev.length})`).join(', ')}</p>` : ''}
         </div>
@@ -1003,6 +1007,7 @@
       metrics: pick(r.metrics), buy_hold: pick(r.buyHold.metrics), benchmark: pick(r.benchmark?.metrics), benchmark_name: r.benchmark?.name,
       deposit: r.deposit ? { annual_rate_pct: S.config.cashRatePct, totalReturn: r.deposit.metrics.totalReturn, cagr: r.deposit.metrics.cagr } : null,
       yearly: r.periodReturns.yearly,
+      relative_to_benchmark: r.relative || null,
     };
   }
   async function review() {

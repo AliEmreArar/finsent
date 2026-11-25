@@ -47,6 +47,7 @@ ctx (orders):
   ctx.buy(sym, { percent: 25 })            // spend 25% of current equity (capped by cash)
   ctx.buy(sym, { amount: 10000 })          // spend 10 000 TL
   ctx.buy(sym, { shares: 100 })
+  ctx.buy(sym, { riskPercent: 1, stopLoss: 0.05 })   // risk-based size: losing 1% of equity if the 5% stop is hit
   options on buy: stopLoss: 0.08 (8% below entry), takeProfit: 0.2, trailingStop: 0.1 (10% below the highest high since entry),
                   reason: 'Türkçe kısa gerekçe' (shown in the trade list)
   ctx.sell(sym)                            // sell all;  ctx.sell(sym, { percent: 50 }) or { shares: n }; reason allowed

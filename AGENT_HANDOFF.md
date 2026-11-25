@@ -366,4 +366,8 @@ Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir 
 - Zaman dilimi: günlük / haftalık / aylık (`engine.aggregateBars`, `config.timeframe`, `ctx.timeframe`). Haftalık mum haftanın son işlem günüyle etiketlenir, böylece emirler dönem kapandıktan sonra gerçekleşir. Grok şeması `timeframe` alanı döndürür. Veri ucu `warmup_days` ile daha uzun ısınma geçmişi verir (haftalık 1800, aylık 4500 gün). Düşüş süresi takvim günüyle ölçülür.
 - Kod kontrolü ve backtest ayrı worker'larda çalışır; yazarken yapılan kontrol uzun bir taramayı öldürmez.
 
+- Endekse göre ölçümler (`engine.relativeMetrics`): beta, yıllık Jensen alfası, korelasyon, takip hatası, bilgi oranı. "Ayrıntılı ölçümler"de ve Grok değerlendirme raporunda yer alır.
+- Risk tabanlı büyüklük: `ctx.buy(sym, { riskPercent: 1, stopLoss: 0.05 })` stop olursa sermayenin %1'ini kaybettirecek büyüklükte alır (nakitle sınırlı).
+- Push 403 verdiği için kullanıcıya `finsent-strateji-lab.bundle` (git bundle) gönderildi; GitHub erişimi düzelince commit'ler doğrudan push'lanmalı.
+
 **Açık fikirler:** gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).

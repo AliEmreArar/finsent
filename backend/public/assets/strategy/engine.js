@@ -434,6 +434,7 @@
         let budget;
         if (order.shares != null) budget = order.shares * price * (1 + comm);
         else if (order.amount != null) budget = order.amount;
+        else if (order.riskPercent != null && order.stopLoss) budget = (eq * order.riskPercent) / 100 / order.stopLoss;   // lose riskPercent of equity if the stop is hit
         else if (order.percent != null) budget = (eq * order.percent) / 100;
         else if (order.targetPercent != null) {
           const cur = pos ? pos.shares * base : 0;
@@ -632,7 +633,10 @@
     if (benchmark && benchmark.date && benchmark.date.length) {
       // the benchmark stays daily: alignBenchmark samples it on the strategy's bar dates
       const bm = alignBenchmark(benchmark, eqDates, cfg.initialCapital);
-      if (bm) result.benchmark = { name: benchmark.name || 'Endeks', equity: bm, metrics: computeMetrics(eqDates, bm, [], { initial: cfg.initialCapital, rfAnnualPct: rf }) };
+      if (bm) {
+        result.benchmark = { name: benchmark.name || 'Endeks', equity: bm, metrics: computeMetrics(eqDates, bm, [], { initial: cfg.initialCapital, rfAnnualPct: rf }) };
+        result.relative = relativeMetrics(eqDates, eqVals, bm);
+      }
     }
     result.periodReturns = periodReturns(eqDates, eqVals);
     result.drawdown = drawdownSeries(eqVals);
@@ -739,6 +743,30 @@
       commission: extra.commission ?? null,
       bestDay: rets.length ? Math.max(...rets) : null,
       worstDay: rets.length ? Math.min(...rets) : null,
+    };
+  }
+
+  // beta, annualised alpha (Jensen, vs the benchmark), correlation, tracking error, information ratio
+  function relativeMetrics(dates, eq, bench) {
+    const a = [], b = [];
+    for (let k = 1; k < eq.length; k++) {
+      if (eq[k - 1] > 0 && bench[k - 1] > 0 && isNum(bench[k]) && isNum(eq[k])) { a.push(eq[k] / eq[k - 1] - 1); b.push(bench[k] / bench[k - 1] - 1); }
+    }
+    const n = a.length;
+    if (n < 20) return null;
+    const ma = a.reduce((x, y) => x + y, 0) / n, mb = b.reduce((x, y) => x + y, 0) / n;
+    let cov = 0, va = 0, vb = 0, te = 0;
+    for (let k = 0; k < n; k++) { cov += (a[k] - ma) * (b[k] - mb); va += (a[k] - ma) ** 2; vb += (b[k] - mb) ** 2; te += (a[k] - b[k] - (ma - mb)) ** 2; }
+    const years = Math.max(yearsBetween(dates[0], dates[dates.length - 1]), 1 / 365);
+    const ppy = n / years;
+    const beta = vb > 0 ? cov / vb : null;
+    const teAnn = Math.sqrt(te / Math.max(1, n - 1)) * Math.sqrt(ppy);
+    return {
+      beta,
+      alpha: beta !== null ? (ma - beta * mb) * ppy : null,
+      correlation: va > 0 && vb > 0 ? cov / Math.sqrt(va * vb) : null,
+      trackingError: teAnn,
+      informationRatio: teAnn > 0 ? ((ma - mb) * ppy) / teAnn : null,
     };
   }
 
@@ -870,5 +898,5 @@
     };
   }
 
-  return { ta, backtest, monteCarlo, rollingWindows, aggregateBars, compileStrategy, resolveParams, computeMetrics, adjustCorporateActions, alignSeries, sweep, walkForward, gridValues, periodReturns, drawdownSeries, StrategyError, DEFAULTS };
+  return { ta, backtest, monteCarlo, rollingWindows, aggregateBars, relativeMetrics, compileStrategy, resolveParams, computeMetrics, adjustCorporateActions, alignSeries, sweep, walkForward, gridValues, periodReturns, drawdownSeries, StrategyError, DEFAULTS };
 });

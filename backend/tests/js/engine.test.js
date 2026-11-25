@@ -418,3 +418,22 @@ test('drawdown duration is measured in calendar days, not bars', () => {
   const m = E.computeMetrics(['2020-01-01', '2020-01-08', '2020-01-15', '2020-01-22'], [100, 90, 95, 101], []);
   assert.equal(m.maxDrawdownDays, 14);
 });
+
+test('riskPercent sizes the position so the stop loses that share of equity', () => {
+  const s = makeSeries(new Array(30).fill(100));
+  const code = `const strategy = { onBar(ctx) { if (!ctx.state.d) { ctx.buy('A', { riskPercent: 1, stopLoss: 0.05 }); ctx.state.d = 1; } } };`;
+  const r = E.backtest({ code, data: { A: s }, config: { initialCapital: 100000, commissionBps: 0, slippageBps: 0 } });
+  assert.equal(r.fills[0].shares, 200);   // 1% of 100k = 1000 TL risk / (100 * 5%) = 200 shares
+});
+
+test('relative metrics: a 2x levered copy has beta 2 and correlation 1', () => {
+  const b = randomWalk(500, 8, 0.0003, 0.01);
+  const a = [100];
+  for (let k = 1; k < b.length; k++) a.push(a[k - 1] * (1 + 2 * (b[k] / b[k - 1] - 1)));
+  const dates = makeSeries(b).date;
+  const m = E.relativeMetrics(dates, a, b);
+  close(m.beta, 2, 1e-9);
+  close(m.correlation, 1, 1e-9);
+  assert.ok(Number.isFinite(m.alpha) && Number.isFinite(m.informationRatio));
+  assert.equal(E.relativeMetrics(dates.slice(0, 5), a.slice(0, 5), b.slice(0, 5)), null);
+});

@@ -22,7 +22,7 @@ function slim(r) {
     logs: r.logs, signals: r.signals, openPositions: r.openPositions,
     params: r.params, symbols: r.symbols, corporateActions: r.corporateActions, warnings: r.warnings,
     totalCommission: r.totalCommission, totalInterest: r.totalInterest, finalCash: r.finalCash, metrics: r.metrics, deposit: r.deposit,
-    buyHold: r.buyHold, benchmark: r.benchmark, periodReturns: r.periodReturns, elapsedMs: r.elapsedMs,
+    buyHold: r.buyHold, benchmark: r.benchmark, relative: r.relative, periodReturns: r.periodReturns, elapsedMs: r.elapsedMs,
   };
 }
 
