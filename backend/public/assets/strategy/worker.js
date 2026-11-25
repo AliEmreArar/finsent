@@ -21,7 +21,7 @@ function slim(r) {
     trades: r.trades.slice(-2000), tradesTotal: r.trades.length, fills: r.fills.slice(-3000), fillsTotal: r.fills.length,
     logs: r.logs, signals: r.signals, openPositions: r.openPositions,
     params: r.params, symbols: r.symbols, corporateActions: r.corporateActions, warnings: r.warnings,
-    totalCommission: r.totalCommission, finalCash: r.finalCash, metrics: r.metrics,
+    totalCommission: r.totalCommission, totalInterest: r.totalInterest, finalCash: r.finalCash, metrics: r.metrics, deposit: r.deposit,
     buyHold: r.buyHold, benchmark: r.benchmark, periodReturns: r.periodReturns, elapsedMs: r.elapsedMs,
   };
 }
@@ -51,6 +51,8 @@ self.onmessage = (ev) => {
       let last = 0;
       const r = E.sweep({ ...payload, onProgress: (f) => { if (f - last > 0.02 || f === 1) { last = f; self.postMessage({ id, progress: f }); } } });
       self.postMessage({ id, ok: true, result: r });
+    } else if (type === 'montecarlo') {
+      self.postMessage({ id, ok: true, result: E.monteCarlo(payload.equity, payload.options || {}) });
     } else if (type === 'walkforward') {
       const r = E.walkForward({ ...payload, onProgress: (f) => self.postMessage({ id, progress: f }) });
       self.postMessage({ id, ok: true, result: r });

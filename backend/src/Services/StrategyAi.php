@@ -140,6 +140,8 @@ trade statistics). Be honest and concrete:
 - Is the sample meaningful (number of trades, years, one lucky period)? Flag overfitting risk.
 - Turkish lira returns are inflated by inflation; when the period is long, compare with the index
   and mention real (USD / gold) terms if relevant.
+- If "deposit" is given, idle cash earned that annual TL rate in the backtest; Turkish deposit and
+  money-market rates are high, so a strategy that does not beat simply holding deposits is weak.
 - Suggest 2-4 specific, testable improvements (parameter ranges, filters, risk rules).
 Never give investment advice or promise future returns.
 TXT;
@@ -322,14 +324,22 @@ TXT;
                 $weaknesses[] = $line . ' Strateji endeksin gerisinde.';
             }
         }
-        if ($trades < 20) {
+        $dep = $report['deposit'] ?? null;
+        if (is_array($dep) && isset($dep['cagr'], $m['cagr'])) {
+            if ($m['cagr'] > $dep['cagr']) {
+                $strengths[] = 'Mevduatın (yıllık ' . $pct($dep['cagr']) . ') üzerinde getiri.';
+            } else {
+                $weaknesses[] = 'Parayı mevduatta tutmak (yıllık ' . $pct($dep['cagr']) . ') daha çok kazandırırdı.';
+            }
+        }
+                if ($trades < 20) {
             $weaknesses[] = "Sadece $trades işlem var: sonuç tesadüf olabilir, istatistiksel olarak zayıf.";
             $suggestions[] = 'Daha uzun bir dönem veya daha fazla hisse ile test et.';
         }
         if ($years < 3) {
             $weaknesses[] = 'Test süresi 3 yıldan kısa; farklı piyasa koşullarını kapsamıyor olabilir.';
         }
-        if (isset($m['exposure']) && $m['exposure'] < 0.3) {
+        if (isset($m['exposure']) && $m['exposure'] < 0.3 && empty($report['deposit'])) {
             $strengths[] = 'Zamanın yalnızca ' . $pct($m['exposure']) . ' kadarında piyasada: nakitte beklerken faiz getirisi de değerlendirilebilir.';
         }
         $suggestions[] = 'Parametre taramasıyla sonucun tek bir değere mi bağlı yoksa geniş bir aralıkta mı tuttuğunu kontrol et.';

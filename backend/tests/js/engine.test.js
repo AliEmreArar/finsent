@@ -328,3 +328,47 @@ test('offline parser: symbols, warnings, unknown text', () => {
   assert.equal(u.templateId, 'sma_cross');
   assert.equal(u.assumptions.length, 1);
 });
+
+// ------------------------------------------------------------------ cash interest and Monte Carlo
+test('idle cash earns the configured annual rate, compounded by calendar day', () => {
+  const s = makeSeries(new Array(262).fill(100));   // ~1 year of business days, flat price
+  const code = 'const strategy = { onBar() {} };';
+  const r = E.backtest({ code, data: { A: s }, config: { initialCapital: 100000, cashRatePct: 40 } });
+  const days = (Date.parse(s.date.at(-1)) - Date.parse(s.date[0])) / 864e5;
+  close(r.equity.at(-1), 100000 * Math.pow(1.4, days / 365), 1e-6);
+  close(r.metrics.interest, r.equity.at(-1) - 100000, 1e-6);
+  close(r.deposit.equity.at(-1), r.equity.at(-1), 1e-6);
+  const r0 = E.backtest({ code, data: { A: s }, config: { initialCapital: 100000 } });
+  assert.equal(r0.equity.at(-1), 100000);
+  assert.equal(r0.deposit, undefined);
+});
+
+test('invested cash earns no interest', () => {
+  const s = makeSeries(new Array(100).fill(50));
+  const r = E.backtest({ code: BUY_FIRST_DAY, data: { A: s }, config: { initialCapital: 10000, cashRatePct: 50, commissionBps: 0, slippageBps: 0 } });
+  // only the leftover cash (< one share) and the first day before the fill earn interest
+  assert.ok(r.metrics.interest < 50 * 0.5 + 10000 * 0.002, `interest ${r.metrics.interest}`);
+});
+
+test('monteCarlo: percentiles are ordered and reproducible', () => {
+  const eq = randomWalk(800, 13, 0.0005, 0.02);
+  const a = E.monteCarlo(eq, { runs: 300 });
+  const b = E.monteCarlo(eq, { runs: 300 });
+  assert.deepEqual(a.totalReturn, b.totalReturn);
+  const t = a.totalReturn;
+  assert.ok(t.p5 <= t.p25 && t.p25 <= t.p50 && t.p50 <= t.p75 && t.p75 <= t.p95);
+  assert.ok(a.maxDrawdown.p5 <= a.maxDrawdown.p95 && a.maxDrawdown.p95 <= 0);
+  assert.ok(a.probLoss >= 0 && a.probLoss <= 1);
+  assert.equal(a.paths.length, 60);
+  assert.equal(E.monteCarlo([1, 2, 3]), null);
+});
+
+test('Sharpe uses excess returns over the deposit rate: pure deposit has ~0 Sharpe', () => {
+  const s = makeSeries(new Array(300).fill(100));
+  const r = E.backtest({ code: 'const strategy = { onBar() {} };', data: { A: s }, config: { cashRatePct: 40 } });
+  assert.ok(Math.abs(r.metrics.sharpe ?? 0) < 1e-6 || r.metrics.sharpe === null, `sharpe ${r.metrics.sharpe}`);
+  const up = makeSeries(randomWalk(300, 5, 0.002, 0.01));
+  const a = E.backtest({ code: BUY_FIRST_DAY, data: { A: up } });
+  const b = E.backtest({ code: BUY_FIRST_DAY, data: { A: up }, config: { cashRatePct: 40 } });
+  assert.ok(b.metrics.sharpe < a.metrics.sharpe);
+});

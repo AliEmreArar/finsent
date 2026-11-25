@@ -50,7 +50,7 @@
     id: null, name: TEMPLATES[0]?.name || 'Yeni strateji', prompt: '', code: TEMPLATES[0]?.code || '',
     chat: [],
     config: { symbols: TEMPLATES[0]?.symbols || ['THYAO'], from: yearsAgo(5), to: today, initialCapital: 100000,
-      commissionBps: 10, slippageBps: 5, fill: 'next_open', currency: 'TRY', benchmark: 'XU100', adjustCorporateActions: true, params: {} },
+      commissionBps: 10, slippageBps: 5, fill: 'next_open', currency: 'TRY', benchmark: 'XU100', adjustCorporateActions: true, cashRatePct: 0, params: {} },
   });
   let S = defaultState();
   let meta = null;          // inspected strategy {name, description, params}
@@ -129,6 +129,8 @@
           <div class="lab-field"><label>Kayma (binde)</label><input type="number" class="field" id="lab-slip" min="0" max="100" step="0.5"></div>
           <div class="lab-field"><label>İşlem fiyatı</label><div class="seg" id="lab-fill"><button data-v="next_open">Ertesi açılış</button><button data-v="close">Sinyal kapanışı</button></div></div>
           <div class="lab-field"><label>Para birimi</label><div class="seg" id="lab-cur"><button data-v="TRY">TL</button><button data-v="USD">USD</button></div></div>
+          <div class="lab-field"><label>Nakit faizi (yıllık %)</label><input type="number" class="field" id="lab-rate" min="0" max="200" step="1">
+            <span class="muted small">Boştaki TL'nin mevduat / para piyasası getirisi. 0 = faizsiz.</span></div>
           <div class="lab-field"><label>Kıyas</label><select class="field" id="lab-bm"><option value="XU100">BIST 100</option><option value="ALTIN">Gram altın</option><option value="USDTRY">Dolar (USD/TRY)</option><option value="NONE">Yok</option></select></div>
           <div class="lab-field"><label class="check-l"><input type="checkbox" id="lab-adj"> Bedelsiz / bölünme düzeltmesi</label>
             <span class="muted small">BIST'te günlük limit %10; ±%30 üzeri gece sıçramaları sermaye işlemi sayılır ve geçmiş fiyatlar düzeltilir.</span></div>
@@ -356,7 +358,7 @@
     const c = S.config;
     $('#lab-from').value = c.from; $('#lab-to').value = c.to;
     $('#lab-cap').value = c.initialCapital; $('#lab-comm').value = c.commissionBps; $('#lab-slip').value = c.slippageBps;
-    $('#lab-bm').value = c.benchmark; $('#lab-adj').checked = c.adjustCorporateActions;
+    $('#lab-bm').value = c.benchmark; $('#lab-adj').checked = c.adjustCorporateActions; $('#lab-rate').value = c.cashRatePct || 0;
     const commPct = () => { $('#lab-comm-pct').textContent = `= %${num(c.commissionBps / 100, 2)} her alım ve satımda`; };
     commPct();
     const segSet = (id, val) => $$(`#${id} button`).forEach((b) => b.classList.toggle('on', b.dataset.v === val));
@@ -368,6 +370,7 @@
     $('#lab-comm').oninput = (e) => { c.commissionBps = Math.max(0, Number(e.target.value) || 0); commPct(); upd(); };
     $('#lab-slip').oninput = (e) => { c.slippageBps = Math.max(0, Number(e.target.value) || 0); upd(); };
     $('#lab-bm').onchange = (e) => { c.benchmark = e.target.value; upd(); };
+    $('#lab-rate').onchange = (e) => { c.cashRatePct = Math.max(0, Math.min(200, Number(e.target.value) || 0)); e.target.value = c.cashRatePct; upd(); };
     $('#lab-adj').onchange = (e) => { c.adjustCorporateActions = e.target.checked; upd(); };
     $$('#lab-fill button').forEach((b) => (b.onclick = () => { c.fill = b.dataset.v; segSet('lab-fill', c.fill); upd(); }));
     $$('#lab-cur button').forEach((b) => (b.onclick = () => { c.currency = b.dataset.v; segSet('lab-cur', c.currency); upd(); }));
@@ -481,7 +484,7 @@
   function engineConfig(data) {
     const c = S.config;
     return { initialCapital: c.initialCapital, commissionBps: c.commissionBps, slippageBps: c.slippageBps, fill: c.fill,
-      adjustCorporateActions: c.adjustCorporateActions, startDate: data.from };
+      adjustCorporateActions: c.adjustCorporateActions, startDate: data.from, cashRatePct: c.currency === 'TRY' ? (c.cashRatePct || 0) : 0 };
   }
 
   async function runBacktest() {
@@ -523,13 +526,13 @@
         ${r.warnings.length ? `<div class="lab-warn">${r.warnings.map((w) => `<div>! ${esc(w)}</div>`).join('')}</div>` : ''}
         <div class="lab-kpis">
           ${kpi('Son değer', fmtMoney(m.final), `Başlangıç ${fmtMoney(m.initial)}`)}
-          ${kpi('Toplam getiri', `<span class="${dirCls(m.totalReturn)}">${pct(m.totalReturn, 1)}</span>`, `Al-tut <b class="${cmp(bh.totalReturn, m.totalReturn)}">${pct(bh.totalReturn, 1)}</b>${bm ? ` · ${esc(bmName)} <b>${pct(bm.totalReturn, 1)}</b>` : ''}`)}
+          ${kpi('Toplam getiri', `<span class="${dirCls(m.totalReturn)}">${pct(m.totalReturn, 1)}</span>`, `Al-tut <b class="${cmp(bh.totalReturn, m.totalReturn)}">${pct(bh.totalReturn, 1)}</b>${bm ? ` · ${esc(bmName)} <b>${pct(bm.totalReturn, 1)}</b>` : ''}${r.deposit ? ` · Mevduat <b class="${cmp(r.deposit.metrics.totalReturn, m.totalReturn)}">${pct(r.deposit.metrics.totalReturn, 1)}</b>` : ''}`)}
           ${kpi('Yıllık getiri', `<span class="${dirCls(m.cagr)}">${pct(m.cagr, 1)}</span>`, `Al-tut ${pct(bh.cagr, 1)}${bm ? ` · ${esc(bmName)} ${pct(bm.cagr, 1)}` : ''}`)}
           ${kpi('En büyük düşüş', `<span class="down">${pct(m.maxDrawdown, 1)}</span>`, `Al-tut ${pct(bh.maxDrawdown, 1)} · ${num(m.maxDrawdownDays, 0)} gün sürdü`)}
           ${kpi('Sharpe', ratio(m.sharpe), `Al-tut ${ratio(bh.sharpe)} · Sortino ${ratio(m.sortino)}`)}
           ${kpi('İşlemler', num(m.trades, 0), m.trades ? `Kazanma %${num(m.winRate * 100, 0)} · ort. ${pct(m.avgTrade, 1)}` : 'Kapanmış işlem yok')}
         </div>
-        <div class="seg lab-tabs" id="lab-tabs"><button data-t="sum" class="on">Özet</button><button data-t="trades">İşlemler</button><button data-t="months">Aylık / yıllık</button><button data-t="opt">Optimizasyon</button><button data-t="wf">Eğitim / test</button><button data-t="log">Günlük</button></div>
+        <div class="seg lab-tabs" id="lab-tabs"><button data-t="sum" class="on">Özet</button><button data-t="trades">İşlemler</button><button data-t="months">Aylık / yıllık</button><button data-t="opt">Optimizasyon</button><button data-t="wf">Eğitim / test</button><button data-t="mc">Risk (Monte Carlo)</button><button data-t="log">Günlük</button></div>
         <div id="lab-tab"></div>
       </div>
       <div class="card reveal" id="lab-review-card" style="margin-top:16px;display:none"></div>`;
@@ -548,6 +551,7 @@
     if (t === 'months') return tabMonths(r, box);
     if (t === 'opt') return tabOptimize(box);
     if (t === 'wf') return tabWalkForward(box);
+    if (t === 'mc') return tabMonteCarlo(r, box);
     if (t === 'log') return tabLog(r, box);
   }
 
@@ -580,6 +584,7 @@
             <dt>Ortalama tutma</dt><dd>${m.avgBarsHeld !== null ? `${num(m.avgBarsHeld, 0)} gün` : '–'}</dd>
             <dt>En iyi / en kötü gün</dt><dd>${pct(m.bestDay, 1)} / ${pct(m.worstDay, 1)}</dd>
             <dt>Ödenen komisyon</dt><dd>${fmtMoney(r.totalCommission)}</dd>
+            ${r.totalInterest ? `<dt>Nakitte kazanılan faiz</dt><dd>${fmtMoney(r.totalInterest)}</dd>` : ''}
             <dt>Süre</dt><dd>${num(m.years, 1)} yıl</dd>
           </dl>
           ${Object.keys(r.corporateActions).length ? `<p class="muted small" style="margin:10px 0 0">Sermaye işlemi düzeltmesi: ${Object.entries(r.corporateActions).map(([s, ev]) => `${esc(s)} (${ev.length})`).join(', ')}</p>` : ''}
@@ -636,6 +641,7 @@
       { label: 'Al-tut', data: r.buyHold.equity, borderColor: C.bh, borderWidth: 1.4, pointRadius: 0, fill: false, borderDash: [4, 3], tension: 0 },
     ];
     if (r.benchmark) ds.push({ label: { XU100: 'BIST 100', ALTIN: 'Gram altın', USDTRY: 'Dolar' }[r.benchmark.name] || r.benchmark.name, data: r.benchmark.equity, borderColor: C.bm, borderWidth: 1.2, pointRadius: 0, fill: false, tension: 0 });
+    if (r.deposit) ds.push({ label: `Mevduat %${num(S.config.cashRatePct, 0)}`, data: r.deposit.equity, borderColor: '#6e6d68', borderWidth: 1, borderDash: [2, 3], pointRadius: 0, fill: false, tension: 0 });
     $('#lab-eq-legend').innerHTML = ds.map((d) => `<span><i class="line-key" style="background:${d.borderColor}"></i>${esc(d.label)} <b class="num">${fmtMoney(d.data.at(-1))}</b></span>`).join('');
     const step = Math.max(1, Math.floor(r.dates.length / 1500));
     const pick = (a) => a.filter((_, i) => i % step === 0 || i === a.length - 1);
@@ -877,6 +883,38 @@
     };
   }
 
+  async function tabMonteCarlo(r, box) {
+    box.innerHTML = '<div class="empty"><span class="spinner"></span> 1.000 alternatif geçmiş üretiliyor…</div>';
+    let mc;
+    try { mc = await run('montecarlo', { equity: r.equity, options: { runs: 1000, block: 20 } }, { timeoutMs: 60000 }); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+    if (!mc) { box.innerHTML = '<div class="empty">Monte Carlo için dönem çok kısa (en az 40 gün).</div>'; return; }
+    const t = mc.totalReturn, d = mc.maxDrawdown, actual = r.metrics.totalReturn;
+    const rank = mc.finals.filter((x) => x < actual).length / mc.finals.length;
+    box.innerHTML = `<p class="muted small" style="margin-top:0">Stratejinin günlük getirileri 20 günlük bloklar halinde karıştırılarak ${num(mc.runs, 0)} alternatif geçmiş üretildi. Aynı kurallar, farklı şans: sonuç bu bantta herhangi bir yere düşebilirdi.</p>
+      <div class="lab-kpis" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+        ${kpi('Kötü senaryo (%5)', `<span class="${dirCls(t.p5)}">${pct(t.p5, 1)}</span>`, `20 geçmişten 1'i bundan kötü`)}
+        ${kpi('Ortanca', `<span class="${dirCls(t.p50)}">${pct(t.p50, 1)}</span>`, `Gerçekleşen ${pct(actual, 1)}`)}
+        ${kpi('İyi senaryo (%95)', `<span class="${dirCls(t.p95)}">${pct(t.p95, 1)}</span>`, '20 geçmişten 1\'i bundan iyi')}
+        ${kpi('Zarar olasılığı', `%${num(mc.probLoss * 100, 0)}`, 'dönem sonunda başlangıcın altında')}
+        ${kpi('Olası en büyük düşüş', `<span class="down">${pct(d.p50, 1)}</span>`, `kötü senaryoda ${pct(d.p5, 1)}`)}
+      </div>
+      <div class="grid g-2"><div><div class="note" style="margin-bottom:6px">Alternatif sermaye yolları (60 örnek)</div><div style="height:240px"><canvas id="mc-paths"></canvas></div></div>
+        <div><div class="note" style="margin-bottom:6px">Dönem sonu getirisinin dağılımı</div><div style="height:240px"><canvas id="mc-hist"></canvas></div></div></div>
+      <p class="muted small">Gerçekleşen sonuç dağılımın %${num(rank * 100, 0)}. yüzdeliğinde. ${rank > 0.9 ? 'Gerçek sonuç alternatiflerin çoğundan iyi: getirilerin sırası lehine işlemiş olabilir.' : rank < 0.1 ? 'Gerçek sonuç alternatiflerin çoğundan kötü: sıralama aleyhine işlemiş.' : 'Gerçek sonuç tipik bir senaryo.'} Bu yöntem getirilerin dağılımını korur; kuralların gelecekte de aynı getiriyi üreteceğini varsayar.</p>`;
+    const C = COLORS();
+    chart('mc-paths', { type: 'line', data: { labels: mc.paths[0].map((_, i) => i), datasets: mc.paths.map((p, i) => ({ data: p.map((x) => (x - 1) * 100), borderColor: i === 0 ? C.strat : 'rgba(163,162,157,.18)', borderWidth: i === 0 ? 1.6 : 1, pointRadius: 0, tension: 0 })) },
+      options: { maintainAspectRatio: false, animation: false, events: [], plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { x: { display: false }, y: { position: 'right', grid: { color: 'rgba(255,255,255,.04)' }, ticks: { callback: (v) => `%${v}` } } } } });
+    const lo = Math.min(...mc.finals), hi = Math.max(...mc.finals), bins = 30, w = (hi - lo) / bins || 1;
+    const counts = new Array(bins).fill(0);
+    mc.finals.forEach((x) => counts[Math.min(bins - 1, Math.floor((x - lo) / w))]++);
+    const labels = counts.map((_, i) => lo + (i + 0.5) * w);
+    const ai = Math.min(bins - 1, Math.max(0, Math.floor((actual - lo) / w)));
+    chart('mc-hist', { type: 'bar', data: { labels: labels.map((x) => `%${num(x * 100, 0)}`), datasets: [{ data: counts, backgroundColor: labels.map((x, i) => (i === ai ? C.strat : x < 0 ? 'rgba(194,65,59,.55)' : 'rgba(53,173,110,.45)')), borderRadius: 2, barPercentage: 1, categoryPercentage: 0.95 }] },
+      options: { maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { ...tooltip, callbacks: { label: (c) => `${c.parsed.y} senaryo` } } },
+        scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } }, y: { display: false } } } });
+  }
+
   function tabLog(r, box) {
     box.innerHTML = `${r.logs.length ? `<div class="lab-log">${r.logs.map((l) => `<div><span class="muted">${esc(l.date)}</span> ${esc(l.msg)}</div>`).join('')}</div>` : '<div class="empty">Kod <code>ctx.log(...)</code> ile buraya not yazabilir.</div>'}
       <div class="note" style="margin:14px 0 6px">Tüm emirler (son ${num(r.fills.length, 0)})</div>
@@ -905,6 +943,7 @@
       name: S.name, description: meta?.description, code: getCode(),
       settings: { symbols: r.symbols, from: r.dates[0], to: r.dates.at(-1), currency: S.config.currency, commission_bps: S.config.commissionBps, slippage_bps: S.config.slippageBps, fill: S.config.fill, params: r.params },
       metrics: pick(r.metrics), buy_hold: pick(r.buyHold.metrics), benchmark: pick(r.benchmark?.metrics), benchmark_name: r.benchmark?.name,
+      deposit: r.deposit ? { annual_rate_pct: S.config.cashRatePct, totalReturn: r.deposit.metrics.totalReturn, cagr: r.deposit.metrics.cagr } : null,
       yearly: r.periodReturns.yearly,
     };
   }

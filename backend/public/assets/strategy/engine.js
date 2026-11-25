@@ -306,6 +306,7 @@
     maxBarsOps: 5e7,
     adjustCorporateActions: true,
     startDate: null,     // trading begins here; earlier bars are indicator warm-up only
+    cashRatePct: 0,      // annual interest on idle cash (TL deposit / money-market fund), compounded per calendar day
   };
 
   class StrategyError extends Error {
@@ -367,6 +368,8 @@
     const comm = cfg.commissionBps / 1e4, slip = cfg.slippageBps / 1e4;
     const lot = Math.max(1, cfg.lotSize | 0);
     let totalCommission = 0;
+    let totalInterest = 0;
+    const dailyRate = cfg.cashRatePct > 0 ? Math.pow(1 + cfg.cashRatePct / 100, 1 / 365) - 1 : 0;
     let i = start;
 
     const px = (sym, k = i) => series[sym].close[k];
@@ -531,6 +534,12 @@
     // ---- main loop
     const priceField = cfg.fill === 'close' ? 'close' : 'open';
     for (i = start; i < n; i++) {
+      if (dailyRate && i > start && cash > 0) {
+        const days = Math.max(0, Math.round((Date.parse(dates[i]) - Date.parse(dates[i - 1])) / 864e5));
+        const interest = cash * (Math.pow(1 + dailyRate, days) - 1);
+        cash += interest;
+        totalInterest += interest;
+      }
       if (priceField === 'open' && pending.length) {
         // sells first so their cash funds the buys
         const orders = pending; pending = [];
@@ -562,16 +571,24 @@
       dates: eqDates, equity: eqVals, exposure: exposure.slice(start),
       trades, fills, logs, signals, openPositions: open,
       params: p, symbols, corporateActions, warnings, config: cfg,
-      totalCommission, finalCash: cash,
+      totalCommission, totalInterest, finalCash: cash,
     };
-    result.metrics = computeMetrics(eqDates, eqVals, trades, { exposure: exposure.slice(start), initial: cfg.initialCapital, commission: totalCommission });
+    const rf = cfg.cashRatePct || 0;
+    result.metrics = computeMetrics(eqDates, eqVals, trades, { exposure: exposure.slice(start), initial: cfg.initialCapital, commission: totalCommission, rfAnnualPct: rf });
+    result.metrics.interest = totalInterest;
+    if (dailyRate) {
+      // the same cash rate as a benchmark: what parking all the money in deposits would have earned
+      const d0 = Date.parse(eqDates[0]);
+      const dep = eqDates.map((d) => cfg.initialCapital * Math.pow(1 + dailyRate, Math.round((Date.parse(d) - d0) / 864e5)));
+      result.deposit = { equity: dep, metrics: computeMetrics(eqDates, dep, [], { initial: cfg.initialCapital, rfAnnualPct: rf }) };
+    }
 
     // benchmarks: buy-and-hold of the strategy's stocks (equal weight) and an optional index
     const bh = buyAndHold(series, symbols, start, cfg);
-    result.buyHold = { equity: bh, metrics: computeMetrics(eqDates, bh, [], { initial: cfg.initialCapital }) };
+    result.buyHold = { equity: bh, metrics: computeMetrics(eqDates, bh, [], { initial: cfg.initialCapital, rfAnnualPct: rf }) };
     if (benchmark && benchmark.date && benchmark.date.length) {
       const bm = alignBenchmark(benchmark, eqDates, cfg.initialCapital);
-      if (bm) result.benchmark = { name: benchmark.name || 'Endeks', equity: bm, metrics: computeMetrics(eqDates, bm, [], { initial: cfg.initialCapital }) };
+      if (bm) result.benchmark = { name: benchmark.name || 'Endeks', equity: bm, metrics: computeMetrics(eqDates, bm, [], { initial: cfg.initialCapital, rfAnnualPct: rf }) };
     }
     result.periodReturns = periodReturns(eqDates, eqVals);
     result.drawdown = drawdownSeries(eqVals);
@@ -630,10 +647,19 @@
     for (let k = 1; k < n; k++) if (eq[k - 1] > 0) rets.push(eq[k] / eq[k - 1] - 1);
     const years = Math.max(yearsBetween(dates[0], dates[n - 1]), 1 / 365);
     const periodsPerYear = rets.length / years || 252;
+    // Sharpe / Sortino on returns in excess of the risk-free (deposit) rate when one is given
+    const rfDaily = extra.rfAnnualPct ? Math.pow(1 + extra.rfAnnualPct / 100, 1 / 365) - 1 : 0;
+    const ex = [];
+    for (let k = 1, j = 0; k < n; k++) {
+      if (!(eq[k - 1] > 0)) continue;
+      const days = rfDaily ? Math.max(0, Math.round((Date.parse(dates[k]) - Date.parse(dates[k - 1])) / 864e5)) : 0;
+      ex.push(rets[j++] - (rfDaily ? Math.pow(1 + rfDaily, days) - 1 : 0));
+    }
     const mean = rets.reduce((a, b) => a + b, 0) / (rets.length || 1);
+    const exMean = ex.reduce((a, b) => a + b, 0) / (ex.length || 1);
     const sd = Math.sqrt(rets.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, rets.length - 1));
-    const downs = rets.filter((r) => r < 0);
-    const dsd = Math.sqrt(downs.reduce((a, b) => a + b * b, 0) / Math.max(1, rets.length));
+    const downs = ex.filter((r) => r < 0);
+    const dsd = Math.sqrt(downs.reduce((a, b) => a + b * b, 0) / Math.max(1, ex.length));
     const dd = drawdownSeries(eq);
     let maxDD = 0, ddStart = 0, maxDur = 0, curStart = 0;
     for (let k = 0; k < n; k++) {
@@ -650,8 +676,8 @@
     return {
       initial, final, totalReturn, cagr, years,
       volatility: vol,
-      sharpe: sd > 0 ? (mean / sd) * Math.sqrt(periodsPerYear) : null,
-      sortino: dsd > 0 ? (mean / dsd) * Math.sqrt(periodsPerYear) : null,
+      sharpe: sd > 0 ? (exMean / sd) * Math.sqrt(periodsPerYear) : null,
+      sortino: dsd > 0 ? (exMean / dsd) * Math.sqrt(periodsPerYear) : null,
       maxDrawdown: maxDD,
       maxDrawdownDays: maxDur,
       maxDrawdownStart: dates[ddStart] ?? null,
@@ -734,5 +760,45 @@
     return { best, inSample: ins, outOfSample: { metrics: out.metrics, buyHold: out.buyHold.metrics } };
   }
 
-  return { ta, backtest, compileStrategy, resolveParams, computeMetrics, adjustCorporateActions, alignSeries, sweep, walkForward, gridValues, periodReturns, drawdownSeries, StrategyError, DEFAULTS };
+  // ------------------------------------------------------------------ Monte Carlo
+  // Block bootstrap of the strategy's daily returns: shuffles 20-day blocks to build many
+  // alternative histories of the same length. Shows how much of the result is the luck of the
+  // order of returns, and what drawdowns are plausible.
+  function monteCarlo(equity, { runs = 1000, block = 20, seed = 7 } = {}) {
+    const rets = [];
+    for (let k = 1; k < equity.length; k++) if (equity[k - 1] > 0) rets.push(equity[k] / equity[k - 1] - 1);
+    const n = rets.length;
+    if (n < block * 2) return null;
+    let st = seed >>> 0;
+    const rnd = () => { st = (st * 1664525 + 1013904223) >>> 0; return st / 4294967296; };
+    const finals = [], dds = [], paths = [];
+    const keepEvery = Math.max(1, Math.floor(n / 120));
+    for (let r = 0; r < runs; r++) {
+      let v = 1, peak = 1, mdd = 0, k = 0;
+      const path = r < 60 ? [1] : null;
+      while (k < n) {
+        const b0 = Math.floor(rnd() * (n - block + 1));
+        for (let j = 0; j < block && k < n; j++, k++) {
+          v *= 1 + rets[b0 + j];
+          if (v > peak) peak = v;
+          const dd = v / peak - 1;
+          if (dd < mdd) mdd = dd;
+          if (path && k % keepEvery === 0) path.push(v);
+        }
+      }
+      finals.push(v - 1);
+      dds.push(mdd);
+      if (path) paths.push(path);
+    }
+    const q = (arr, p) => { const a = arr.slice().sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.max(0, Math.floor(p * (a.length - 1))))]; };
+    return {
+      runs, block, days: n,
+      totalReturn: { p5: q(finals, 0.05), p25: q(finals, 0.25), p50: q(finals, 0.5), p75: q(finals, 0.75), p95: q(finals, 0.95) },
+      maxDrawdown: { p5: q(dds, 0.05), p50: q(dds, 0.5), p95: q(dds, 0.95) },
+      probLoss: finals.filter((x) => x < 0).length / runs,
+      finals, paths,
+    };
+  }
+
+  return { ta, backtest, monteCarlo, compileStrategy, resolveParams, computeMetrics, adjustCorporateActions, alignSeries, sweep, walkForward, gridValues, periodReturns, drawdownSeries, StrategyError, DEFAULTS };
 });
