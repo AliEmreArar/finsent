@@ -11,35 +11,40 @@
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
 
   // ------------------------------------------------------------------ worker
-  let worker = null, seq = 0;
-  const waiting = new Map();
-  function getWorker() {
-    if (worker) return worker;
-    worker = new Worker('/assets/strategy/worker.js');
-    worker.onmessage = (ev) => {
+  // Two workers: 'main' for backtests / sweeps, 'inspect' for the quick compile check that runs
+  // while the user types, so a timeout of one never kills the other.
+  let seq = 0;
+  const pools = {};
+  function getPool(name) {
+    if (pools[name]) return pools[name];
+    const pool = { worker: new Worker('/assets/strategy/worker.js'), waiting: new Map() };
+    pool.worker.onmessage = (ev) => {
       const { id, progress } = ev.data;
-      const w = waiting.get(id);
+      const w = pool.waiting.get(id);
       if (!w) return;
       if (progress !== undefined) { w.onProgress?.(progress); return; }
       clearTimeout(w.timer);
-      waiting.delete(id);
+      pool.waiting.delete(id);
       ev.data.ok ? w.resolve(ev.data.result) : w.reject(Object.assign(new Error(ev.data.error.message), ev.data.error));
     };
-    worker.onerror = (e) => { e.preventDefault(); killWorker(new Error(e.message || 'Worker hatası')); };
-    return worker;
+    pool.worker.onerror = (e) => { e.preventDefault(); killPool(name, new Error(e.message || 'Worker hatası')); };
+    pools[name] = pool;
+    return pool;
   }
-  function killWorker(err) {
-    if (worker) worker.terminate();
-    worker = null;
-    for (const w of waiting.values()) { clearTimeout(w.timer); w.reject(err); }
-    waiting.clear();
+  function killPool(name, err) {
+    const pool = pools[name];
+    if (!pool) return;
+    pool.worker.terminate();
+    delete pools[name];
+    for (const w of pool.waiting.values()) { clearTimeout(w.timer); w.reject(err); }
   }
   function run(type, payload, { timeoutMs = 30000, onProgress } = {}) {
     const id = ++seq;
+    const name = type === 'inspect' ? 'inspect' : 'main';
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => killWorker(Object.assign(new Error(`Strateji ${Math.round(timeoutMs / 1000)} saniyede bitmedi (sonsuz döngü olabilir), durduruldu.`), { phase: 'timeout' })), timeoutMs);
-      waiting.set(id, { resolve, reject, timer, onProgress });
-      getWorker().postMessage({ id, type, payload });
+      const timer = setTimeout(() => killPool(name, Object.assign(new Error(`Strateji ${Math.round(timeoutMs / 1000)} saniyede bitmedi (sonsuz döngü olabilir), durduruldu.`), { phase: 'timeout' })), timeoutMs);
+      getPool(name).waiting.set(id, { resolve, reject, timer, onProgress });
+      pools[name].worker.postMessage({ id, type, payload });
     });
   }
 
@@ -859,7 +864,7 @@
     const median = sorted[Math.floor(sorted.length / 2)];
     const positive = valid.filter((r) => r.totalReturn > 0).length / valid.length;
     const ok = positive >= 0.7;
-    return { ok, text: `Denenen ayarların %${Math.round(positive * 100)}'i kârlı; ortanca ${METRICS[metric][0].toLowerCase()} ${METRICS[metric][1](median)}. ${ok ? 'Sonuç geniş bir parametre bölgesinde tutuyor.' : 'Sonuç parametre seçimine çok bağlı: aşırı uyum riski yüksek.'}` };
+    return { ok, text: `Kârlı ayar oranı: %${Math.round(positive * 100)}; ortanca ${METRICS[metric][0].toLowerCase()} ${METRICS[metric][1](median)}. ${ok ? 'Sonuç geniş bir parametre bölgesinde tutuyor.' : 'Sonuç parametre seçimine çok bağlı: aşırı uyum riski yüksek.'}` };
   }
 
   function tabWalkForward(box) {
