@@ -107,5 +107,30 @@ check('API doc mentions every ctx method the engine exposes', function () {
     }
 });
 
+check('paper replay: average cost, realised P&L, partial sells', function () {
+    $st = \FinSent\Controllers\PaperController::replay(10000, [
+        ['symbol' => 'A', 'side' => 'buy', 'shares' => 10, 'price' => 100, 'fee' => 1],
+        ['symbol' => 'A', 'side' => 'buy', 'shares' => 10, 'price' => 120, 'fee' => 1],
+        ['symbol' => 'A', 'side' => 'sell', 'shares' => 5, 'price' => 130, 'fee' => 1],
+        ['symbol' => 'B', 'side' => 'sell', 'shares' => 5, 'price' => 130, 'fee' => 1],   // nothing held: ignored
+    ]);
+    eq(round($st['cash'], 4), 10000.0 - 1001 - 1201 + 649);
+    eq($st['positions']['A']['shares'], 15.0);
+    eq(round($st['positions']['A']['avg_price'], 4), round(2202 * 0.75 / 15, 4));
+    eq(round($st['realised'], 4), round(649 - 2202 * 0.25, 4));
+});
+
+check('paper sizeOrder: amount, shares, cash and holdings limits', function () {
+    $P = \FinSent\Controllers\PaperController::class;
+    $st = ['cash' => 1000.0, 'positions' => ['A' => ['shares' => 3.0]]];
+    eq($P::sizeOrder($st, 'B', 'buy', 99, null, 1000, 10)['shares'], 10);
+    throwsHttp(fn() => $P::sizeOrder($st, 'B', 'buy', 99, 11, null, 10), 400);
+    throwsHttp(fn() => $P::sizeOrder($st, 'B', 'buy', 2000, null, 1000, 10), 400);
+    eq($P::sizeOrder($st, 'A', 'sell', 50, null, null, 10)['shares'], 3);
+    eq($P::sizeOrder($st, 'A', 'sell', 50, 10, null, 10)['shares'], 3);
+    throwsHttp(fn() => $P::sizeOrder($st, 'C', 'sell', 50, 1, null, 10), 400);
+    eq($P::sizeOrder($st, 'A', 'sell', 50, 2, null, 10)['fee'], 0.1);
+});
+
 echo "\n$passed passed, $failed failed\n";
 exit($failed ? 1 : 0);

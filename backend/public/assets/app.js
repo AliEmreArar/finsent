@@ -1090,7 +1090,8 @@ async function initSearch() {
 
 // ------------------------------------------------------------------ router
 const ROUTES = { piyasa: pageMarket, hisse: pageStock, cift: (v, a) => pagePair(v, a, location.hash.split('/')[3]), bildirimler: (v, a) => pageNews(v, a), sinyaller: pageSignals, analiz: pageAnalyze, sistem: pageSystem,
-  strateji: (v, a) => window.pageLab(v, a), stratejiler: (v) => window.pageStrategies(v) };
+  strateji: (v, a) => window.pageLab(v, a), stratejiler: (v) => window.pageStrategies(v),
+  portfoy: (v, a) => window.pagePaper(v, a) };
 async function route() {
   const [, name = 'piyasa', arg] = location.hash.split('/');
   const page = ROUTES[name] || pageMarket;

@@ -592,6 +592,7 @@
     drawEquity(r, 'linear');
     $$('#lab-eq-scale button').forEach((b) => (b.onclick = () => { $$('#lab-eq-scale button').forEach((x) => x.classList.toggle('on', x === b)); drawEquity(r, b.dataset.v); }));
     drawPriceTrades(r, r.symbols[0]);
+    $('#lab-apply').onclick = () => applySignals(r);
     $('#lab-px-sym').onchange = (e) => drawPriceTrades(r, e.target.value);
   }
 
@@ -599,7 +600,33 @@
     if (!r.signals.length) return '<div class="muted small">Son kapanışa göre yeni bir al/sat sinyali yok.</div>';
     return `<div class="rows">${r.signals.map((s) => `<div class="row" style="cursor:default"><span class="pill ${s.side === 'buy' ? 'pos' : 'neg'}">${s.side === 'buy' ? 'AL' : 'SAT'}</span>
       <b>${esc(s.sym)}</b><span class="muted small" style="flex:1">${esc(s.reason)}</span>${s.percent ? `<span class="num small">%${num(s.percent, 0)}</span>` : ''}</div>`).join('')}</div>
+      <div class="toolbar" style="margin:10px 0 0"><button class="btn sm primary" id="lab-apply">Sanal portföye uygula</button>
+        <span class="muted small">Alımlar portföy değerinin sinyaldeki yüzdesiyle, satışlar pozisyonun tamamıyla yapılır.</span></div>
       <p class="muted small" style="margin:6px 0 0">Sinyaller bir sonraki seansın açılışında uygulanırdı. Yatırım tavsiyesi değildir.</p>`;
+  }
+
+  async function applySignals(r) {
+    if (!window.paperApi) return;
+    if (S.config.currency !== 'TRY') { toast('Sanal portföy TL bazlı: para birimini TL yapıp yeniden test et.'); return; }
+    const btn = $('#lab-apply'); btn.disabled = true;
+    try {
+      const acc = await window.paperApi.ensureAccount();
+      const full = await api(`/paper/${acc.id}`);
+      if (!confirm(`${r.signals.length} sinyal "${full.name}" portföyüne uygulansın mı?`)) { btn.disabled = false; return; }
+      const done = [], failed = [];
+      for (const s of r.signals.filter((x) => x.side === 'sell').concat(r.signals.filter((x) => x.side === 'buy'))) {
+        try {
+          const o = s.side === 'sell' ? { symbol: s.sym, side: 'sell' }
+            : { symbol: s.sym, side: 'buy', amount: Math.floor(full.value * (s.percent ?? 100 / r.symbols.length) / 100) };
+          const res = await window.paperApi.order(acc.id, { ...o, note: `${S.name}: ${s.reason}`.slice(0, 250) });
+          done.push(`${res.side === 'buy' ? 'AL' : 'SAT'} ${res.shares} ${res.symbol}`);
+        } catch (e) { failed.push(`${s.sym}: ${e.message}`); }
+      }
+      toast(`${done.length} emir uygulandı${failed.length ? `, ${failed.length} başarısız` : ''}`);
+      if (failed.length) console.warn(failed);
+      if (done.length && confirm('Sanal portföye gidilsin mi?')) location.hash = `#/portfoy/${acc.id}`;
+    } catch (e) { toast(e.message); }
+    btn.disabled = false;
   }
 
   function drawEquity(r, scale) {

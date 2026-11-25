@@ -12,6 +12,7 @@ use FinSent\Controllers\InstrumentController;
 use FinSent\Controllers\MarketController;
 use FinSent\Controllers\OverviewController;
 use FinSent\Controllers\PairController;
+use FinSent\Controllers\PaperController;
 use FinSent\Controllers\PatternController;
 use FinSent\Controllers\SocialController;
 use FinSent\Controllers\StrategyController;
@@ -80,6 +81,13 @@ $router->get('/api/strategies', [StrategyController::class, 'list']);
 $router->post('/api/strategies', [StrategyController::class, 'save']);
 $router->get('/api/strategies/{id}', [StrategyController::class, 'show']);
 $router->post('/api/strategies/{id}/delete', [StrategyController::class, 'delete']);
+// virtual (paper) portfolios
+$router->get('/api/paper', [PaperController::class, 'list']);
+$router->post('/api/paper', [PaperController::class, 'create']);
+$router->get('/api/paper/{id}', [PaperController::class, 'show']);
+$router->post('/api/paper/{id}/order', [PaperController::class, 'order']);
+$router->post('/api/paper/{id}/reset', [PaperController::class, 'reset']);
+$router->post('/api/paper/{id}/delete', [PaperController::class, 'delete']);
 
 try {
     $router->dispatch($method, rtrim($path, '/') ?: '/');
