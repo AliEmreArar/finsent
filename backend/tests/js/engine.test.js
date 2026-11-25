@@ -191,6 +191,7 @@ test('errors in strategy code are reported with phase and date', () => {
     assert.equal(e.date, data.A.date[1]);
   }
   assert.throws(() => E.backtest({ code: 'const strategy = { onBar(ctx){ ctx.ind("A","nope") } };', data }), /göstergesi/);
+  try { E.backtest({ code: 'const strategy = { onBar(ctx){ ctx.ind("A","nope") } };', data }); } catch (e) { assert.equal(e.phase, 'onBar'); assert.equal(e.date, data.A.date[0]); }
 });
 
 test('params: defaults, clamping and overrides', () => {

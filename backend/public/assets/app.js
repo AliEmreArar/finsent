@@ -1089,11 +1089,13 @@ async function initSearch() {
 }
 
 // ------------------------------------------------------------------ router
-const ROUTES = { piyasa: pageMarket, hisse: pageStock, cift: (v, a) => pagePair(v, a, location.hash.split('/')[3]), bildirimler: (v, a) => pageNews(v, a), sinyaller: pageSignals, analiz: pageAnalyze, sistem: pageSystem };
+const ROUTES = { piyasa: pageMarket, hisse: pageStock, cift: (v, a) => pagePair(v, a, location.hash.split('/')[3]), bildirimler: (v, a) => pageNews(v, a), sinyaller: pageSignals, analiz: pageAnalyze, sistem: pageSystem,
+  strateji: (v, a) => window.pageLab(v, a), stratejiler: (v) => window.pageStrategies(v) };
 async function route() {
   const [, name = 'piyasa', arg] = location.hash.split('/');
   const page = ROUTES[name] || pageMarket;
-  $$('.sidebar nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === (ROUTES[name] ? name : 'piyasa')));
+  $$('.sidebar nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === (ROUTES[name] ? (name === 'stratejiler' ? 'strateji' : name) : 'piyasa')));
+  if (window.__pageCleanup) { try { window.__pageCleanup(); } catch { /* ignore */ } window.__pageCleanup = null; }
   if (lw && name !== 'hisse') { lw.remove(); lw = null; }
   if (name !== 'hisse') { window.__stock = null; window.__chartRefs = null; }
   const v = $('#view');

@@ -541,7 +541,7 @@
       try {
         strat.onBar(ctx, p);
       } catch (e) {
-        if (e instanceof StrategyError) throw e;
+        if (e instanceof StrategyError) { if (!e.phase) { e.phase = 'onBar'; e.date = dates[i]; e.stack = e.stack || ''; } throw e; }
         throw new StrategyError(`onBar() hatası (${dates[i]}): ${e.message}`, { phase: 'onBar', date: dates[i], stack: e.stack });
       }
       if (priceField === 'close' && pending.length) {

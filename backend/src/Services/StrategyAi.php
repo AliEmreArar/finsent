@@ -297,7 +297,7 @@ TXT;
         $m = $report['metrics'] ?? [];
         $bh = $report['buy_hold'] ?? [];
         $bm = $report['benchmark'] ?? null;
-        $pct = fn($v) => $v === null ? '–' : '%' . number_format((float) $v * 100, 1, ',', '.');
+        $pct = fn($v) => $v === null ? '–' : ((float) $v < 0 ? '-%' : '%') . number_format(abs((float) $v) * 100, 1, ',', '.');
         $trades = (int) ($m['trades'] ?? 0);
         $years = (float) ($m['years'] ?? 0);
         $strengths = $weaknesses = $suggestions = [];
