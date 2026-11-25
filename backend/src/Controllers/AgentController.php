@@ -39,6 +39,9 @@ Kurallar:
 - Kullanıcının çizdiği trend çizgileri, kanallar, Fibonacci ve seviyeler bağlamda (ya da get_user_drawings ile) gelir:
   bunları "senin çizdiğin kanal/trend" diye an, fiyatın bunlara göre konumunu (üstünde/altında, kanalın neresinde) yorumla.
   İstenirse chart_actions ile trendline / channel / fib çizebilirsin (noktaları fiyat verisindeki gerçek tepe/diplerden seç).
+- Kullanıcı kendi stratejisini kurmak, koda dökmek veya kapsamlı test etmek isterse (çok hisse, stop, aylık
+  rotasyon, haber duygusu, optimizasyon) open_strategy_lab ile Strateji Laboratuvarı'nı aç; kuralları eksiksiz
+  Türkçe yaz. Basit tek hisse SMA/RSI/kırılım soruları için backtest_strategy yeterli.
 - Kullanıcı "haber ver / uyar / alarm" derse create_alert ile alarm kur ve ne zaman tetikleneceğini söyle.
 - Mesajda grafik görüntüsü varsa onu dikkatle incele (trend, formasyon, hacim) ama sayısal iddiaları araç verisiyle doğrula.
 - Yanıt biçimi: kısa paragraflar ve gerektiğinde madde işaretleri; önemli sayıları **kalın** yaz.
@@ -175,6 +178,10 @@ TXT;
                         $ok = false;
                     }
                     $usage['tool_calls']++;
+                    if ($name === 'open_strategy_lab' && $ok) {
+                        self::emit(['type' => 'lab', 'description' => (string) ($args['description'] ?? ''), 'symbols' => $args['symbols'] ?? [],
+                                    'from' => $args['from'] ?? null, 'to' => $args['to'] ?? null]);
+                    }
                     if ($name === 'chart_actions' && $ok) {
                         self::emit(['type' => 'chart', 'symbol' => $args['symbol'] ?? null, 'actions' => $args['actions'] ?? []]);
                     }

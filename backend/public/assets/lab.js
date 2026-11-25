@@ -173,6 +173,23 @@
     else if (arg && arg.startsWith('t-')) loadTemplate(arg.slice(2));
     await inspect(false);
     window.__pageCleanup = () => { if (priceChart) { priceChart.remove(); priceChart = null; } };
+    window.labReceive();
+  };
+
+  // a strategy sent from the Grok assistant panel (open_strategy_lab tool)
+  window.labReceive = function labReceive() {
+    const h = window.__labHandoff;
+    if (!h || !h.description) return;
+    window.__labHandoff = null;
+    const syms = (h.symbols || []).map((s) => String(s).toUpperCase().replace('.IS', '')).filter((s) => /^[A-Z0-9]{2,12}$/.test(s));
+    if (syms.length) { S.config.symbols = syms.slice(0, 40); renderSymbols(); }
+    const okDate = (d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d);
+    if (okDate(h.from)) { S.config.from = h.from; $('#lab-from').value = h.from; }
+    if (okDate(h.to)) { S.config.to = h.to; $('#lab-to').value = h.to; }
+    markRange(); saveDraft();
+    $('#lab-prompt').value = h.description;
+    toast('Asistandan gelen strateji koda dökülüyor');
+    generate();
   };
 
   function starterCode() {

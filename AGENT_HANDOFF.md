@@ -327,7 +327,7 @@ Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir 
 | `assets/lab.js` | Arayüz (`window.pageLab`, `window.pageStrategies`). CodeMirror 5 (CDN, yüklenmezse düz textarea) |
 | `src/Controllers/StrategyController.php` | `GET /api/strategy/status`, `GET /api/strategy/data` (çoklu sembol, sütunsal; ısınma için 420 gün ek geçmiş; kıyas serisi; günlük KAP duygu), `GET /api/strategy/universe?n&as_of` (o tarihteki en likit hisseler: hayatta kalma yanılgısı yok), `POST /api/strategy/generate|fix|review`, `GET/POST /api/strategies`, `GET /api/strategies/{id}`, `POST /api/strategies/{id}/delete` |
 | `src/Services/StrategyAi.php` | Grok istemleri (`API_DOC` motorla senkron tutulmalı; PHP testi bunu denetler), json_schema yapılandırılmış çıktı, kural tabanlı `offlineReview` |
-| `sql/schema.sql` → `strategies` | Kayıtlı stratejiler (kod, ayarlar, son sonuç özeti). Eski veritabanlarında controller tabloyu `CREATE TABLE IF NOT EXISTS` ile kendisi kurar |
+| `sql/schema.sql` → `strategies`, `paper_accounts`, `paper_trades` | Kayıtlı stratejiler (kod, ayarlar, son sonuç özeti). Eski veritabanlarında controller tabloyu `CREATE TABLE IF NOT EXISTS` ile kendisi kurar |
 
 **Strateji API'si** (Grok'un yazdığı kod): `const strategy = { name, description, params: { k: { label, default, min, max, step } }, indicators(s, p, ta, sym), onBar(ctx, p) }`. Emirler `ctx.buy/sell/targetPercent/closeAll`, seçenekler `stopLoss/takeProfit/trailingStop/reason`. Tam liste: `StrategyAi::API_DOC` ve arayüzdeki "API" düğmesi.
 
@@ -343,4 +343,20 @@ Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir 
 
 **Test ortamı notu:** Bulut oturumunda MariaDB kurulup snapshot tabloları (market_daily, disclosures, sentiment, event_returns, companies) yüklendi ve `php -S` ile Playwright uçtan uca testi yapıldı (CDN kütüphaneleri npm'den yerel servis edildi). Gerçek THYAO verisiyle SMA 50/200 (2021-11 → 2026-11): strateji yıllık +%52, al-tut +%76, BIST 100 +%45. Kazancın neredeyse tamamı tek işlemden geldi, sonra üç zararlı işlem oldu. Bu da al-tut'un neden zor geçildiğini gösteriyor.
 
-**Açık fikirler:** sanal portföy (ileriye dönük kâğıt üzerinde işlem), kayıtlı stratejileri aynı grafikte karşılaştırma, ajan panelinden laboratuvara strateji gönderme, gün içi bar desteği, açığa satış.
+**Nakit faizi ve risk:**
+- "Nakit faizi (yıllık %)" ayarı (yalnızca TL'de): boştaki nakit takvim günü başına bileşik faiz kazanır. Aynı oranla "Mevduat" kıyas eğrisi çizilir.
+- Sharpe ve Sortino, bu oranın üzerindeki **fazla getiriyle** hesaplanır; faizsizde ham getiriyle. Saf mevduatın Sharpe'ı ≈ 0.
+- "Risk (Monte Carlo)" sekmesi: günlük getiriler 20 günlük bloklarla 1.000 kez yeniden örneklenir. Sonuçta p5/p50/p95 getiri, zarar olasılığı, olası en büyük düşüş, 60 örnek yol ve dağılım histogramı gösterilir.
+
+**Sanal portföy (`#/portfoy`, `PaperController`, `assets/paper.js`):**
+- Tablolar: `paper_accounts` (başlangıç bakiyesi, komisyon) ve `paper_trades`. Pozisyonlar işlemlerden yeniden oynatılarak hesaplanır (`replay`, ortalama maliyet, gerçekleşen K/Z).
+- Emir fiyatı: Yahoo gecikmeli fiyatı (yalnızca son kapanıştan yeniyse), yoksa son kapanış.
+- Değerleme günlük kapanışla yapılır; BIST 100 ile kıyaslanır.
+- API: `GET/POST /api/paper`, `GET /api/paper/{id}`, `POST /api/paper/{id}/order` (`preview: true` ile önizleme), `/reset`, `/delete`.
+- Laboratuvarda "Sanal portföye uygula" düğmesi bugünün sinyallerini portföye emir olarak gönderir.
+
+**Asistan entegrasyonu:**
+- Yeni ajan araçları: `open_strategy_lab` (NDJSON `type: lab` olayı; tarayıcı `#/strateji`'ye gider, açıklamayı koda döktürür ve test eder), `get_saved_strategies`, `get_paper_portfolio`.
+- Asistan → laboratuvar akışı sahte bir xAI sunucusuyla uçtan uca test edildi.
+
+**Açık fikirler:** kayıtlı stratejileri aynı grafikte karşılaştırma, gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).
