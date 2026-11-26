@@ -90,6 +90,9 @@ services:
 
   airflow:
     mem_limit: 5g          # a runaway job is OOM-killed inside the container instead of freezing the Docker VM
+    # Linux hosts: ./data is a bind mount, so the container user must be able to write it. Set
+    # AIRFLOW_UID=$(id -u) in .env to run as your own user (the image supports any uid with gid 0).
+    user: "${AIRFLOW_UID:-50000}:0"
     build:
       context: .
       dockerfile: airflow/Dockerfile

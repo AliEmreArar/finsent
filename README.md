@@ -44,6 +44,8 @@ docker compose up -d --build
 docker compose exec airflow finsent seed          # downloads the data snapshot (~730 MB), ~10 min
 ```
 
+On a **Linux** host, Airflow must be able to write the bind-mounted `data/` folder. Before `up`, either run `echo "AIRFLOW_UID=$(id -u)" >> .env` or run `sudo chown -R 50000:0 data`. Without one of them, `finsent seed` fails with `PermissionError: /opt/finsent/data/...`. Docker Desktop on Windows and macOS does not need either.
+
 Open http://localhost:8080. Everything except the live LLM features works without an API key: the agent panel, rescoring, X search and the market brief need `XAI_API_KEY`.
 
 ### Data snapshot
