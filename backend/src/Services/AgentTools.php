@@ -71,6 +71,14 @@ final class AgentTools
                 'years' => ['type' => 'integer', 'description' => 'history length, default 5'],
                 'cost_bps' => ['type' => 'number', 'description' => 'per side, default 10'],
             ], ['symbol', 'strategy']),
+            $fn('open_strategy_lab', 'Open the Strategy Lab in the user\'s browser with a strategy description: the lab turns it into code with Grok and backtests it with virtual money (any rules, many stocks, stops, monthly rebalancing, KAP news sentiment, parameter sweeps, Monte Carlo). Use when the user wants to build, code, test or optimise their own strategy beyond the simple backtest_strategy presets, or says "laboratuvar", "stratejimi test et", "koda dök".', [
+                'description' => ['type' => 'string', 'description' => 'the strategy rules in Turkish, complete and explicit (entry, exit, sizing, stops)'],
+                'symbols' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'BIST tickers to test on'],
+                'from' => ['type' => 'string', 'description' => 'YYYY-MM-DD start (optional)'],
+                'to' => ['type' => 'string', 'description' => 'YYYY-MM-DD end (optional)'],
+            ], ['description']),
+            $fn('get_saved_strategies', 'The user\'s saved Strategy Lab strategies with their last backtest summary (period, CAGR, buy-and-hold CAGR, max drawdown, Sharpe, trades).', []),
+            $fn('get_paper_portfolio', 'The user\'s virtual (paper) portfolios: value, P&L, cash and positions.', []),
             $fn('market_overview', 'BIST 100 level and change, breadth, top movers and the latest AI market brief.', []),
             $fn('chart_actions', 'Change or draw on the user\'s price chart. Use whenever the user asks to show, draw, mark or switch something on the chart, and after finding levels the user would want to see.', [
                 'symbol' => ['type' => 'string', 'description' => 'open this stock first (optional)'],
@@ -121,9 +129,35 @@ final class AgentTools
             'create_alert' => AlertController::create($sym(), (string) ($a['kind'] ?? ''), (float) ($a['value'] ?? 0), $a['note'] ?? null),
             'list_alerts' => AlertController::list(),
             'delete_alert' => AlertController::delete((string) ($a['id'] ?? 0)),
+            'open_strategy_lab' => ['ok' => true, 'note' => 'The Strategy Lab is opening in the user\'s browser; it will generate the code and run the backtest there. Tell the user what you sent and that results appear on the lab page.'],
+            'get_saved_strategies' => self::savedStrategies(),
+            'get_paper_portfolio' => self::paperPortfolio(),
             'chart_actions' => ['ok' => true, 'applied' => count($a['actions'] ?? []), 'note' => 'Actions are applied in the user\'s browser.'],
             default => ['error' => "unknown tool $name"],
         };
+    }
+
+    /** @return array<string,mixed> */
+    private static function savedStrategies(): array
+    {
+        $rows = \FinSent\Controllers\StrategyController::list()['strategies'];
+        return ['strategies' => array_map(fn($s) => [
+            'id' => $s['id'], 'name' => $s['name'], 'description' => $s['description'],
+            'symbols' => $s['config']['symbols'] ?? [], 'params' => $s['config']['params'] ?? [],
+            'last_result' => is_array($s['last_result']) ? array_diff_key($s['last_result'], ['spark' => 1]) : null,
+        ], array_slice($rows, 0, 30))];
+    }
+
+    /** @return array<string,mixed> */
+    private static function paperPortfolio(): array
+    {
+        $out = [];
+        foreach (\FinSent\Controllers\PaperController::list()['accounts'] as $a) {
+            $out[] = ['id' => $a['id'], 'name' => $a['name'], 'value' => round($a['value'], 2), 'return_pct' => round($a['return'] * 100, 2),
+                      'cash' => round($a['cash'], 2), 'positions' => array_map(fn($p) => ['symbol' => $p['symbol'], 'shares' => $p['shares'],
+                      'avg_price' => round($p['avg_price'], 4), 'price' => $p['price'], 'pnl_pct' => $p['pnl_pct'] !== null ? round($p['pnl_pct'] * 100, 2) : null], $a['positions'])];
+        }
+        return ['accounts' => $out];
     }
 
     private static function symbol(string $s): string

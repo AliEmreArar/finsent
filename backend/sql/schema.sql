@@ -224,3 +224,42 @@ CREATE TABLE IF NOT EXISTS drawings (
     payload     JSON        NOT NULL,
     updated_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
+
+-- Strategy lab: user / Grok-written strategies (JavaScript run in the browser) with their settings
+-- and the summary of the last backtest.
+CREATE TABLE IF NOT EXISTS strategies (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(120) NOT NULL,
+    description TEXT         NULL,
+    prompt      TEXT         NULL,
+    code        MEDIUMTEXT   NOT NULL,
+    config      JSON         NOT NULL,
+    last_result JSON         NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- Virtual (paper) portfolios: virtual cash, trades at the latest price; positions are replayed from trades.
+CREATE TABLE IF NOT EXISTS paper_accounts (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name         VARCHAR(120) NOT NULL,
+    initial_cash DOUBLE       NOT NULL,
+    fee_bps      DOUBLE       NOT NULL DEFAULT 10,
+    strategy_id  BIGINT       NULL,
+    created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    account_id   BIGINT       NOT NULL,
+    symbol       VARCHAR(12)  NOT NULL,
+    side         ENUM('buy','sell') NOT NULL,
+    shares       DOUBLE       NOT NULL,
+    price        DOUBLE       NOT NULL,
+    fee          DOUBLE       NOT NULL,
+    price_source VARCHAR(16)  NOT NULL,
+    note         VARCHAR(255) NULL,
+    traded_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_paper_acc (account_id, traded_at),
+    CONSTRAINT fk_paper_acc FOREIGN KEY (account_id) REFERENCES paper_accounts (id) ON DELETE CASCADE
+) ENGINE=InnoDB;

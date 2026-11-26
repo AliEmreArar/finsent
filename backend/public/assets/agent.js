@@ -8,6 +8,7 @@
     get_patterns: 'Formasyonlar', get_kap_disclosures: 'KAP bildirimleri', news_impact_study: 'Haber etki analizi',
     get_forecast: 'Model tahmini', get_social_sentiment: 'X duygusu', compare_stocks: 'Hisse karşılaştırma',
     screen_stocks: 'Hisse taraması', backtest_strategy: 'Strateji testi', market_overview: 'Piyasa özeti', chart_actions: 'Grafiğe çizim', get_user_drawings: 'Çizimlerin okunuyor', create_alert: 'Alarm kuruluyor', list_alerts: 'Alarmlar', delete_alert: 'Alarm siliniyor',
+    open_strategy_lab: 'Strateji Laboratuvarı açılıyor', get_saved_strategies: 'Kayıtlı stratejiler', get_paper_portfolio: 'Sanal portföy',
   };
   const SUGGEST = {
     hisse: (s) => [`${s} için destek ve direnç seviyelerini bul, grafiğe çiz`, `${s}'da RSI ve MACD ne söylüyor? Trend güçlü mü?`,
@@ -156,6 +157,10 @@
             if (ev.name === 'create_alert' || ev.name === 'delete_alert') window.dispatchEvent(new Event('finsent:alerts'));
             const el = stepEls[ev.name];
             if (el) { el.classList.add(ev.ok ? 'done' : 'fail'); el.querySelector('.s-ic').textContent = ev.ok ? '✓' : '!'; }
+          } else if (ev.type === 'lab') {
+            window.__labHandoff = { description: ev.description, symbols: ev.symbols, from: ev.from, to: ev.to };
+            if (location.hash.startsWith('#/strateji') && window.labReceive) window.labReceive();
+            else location.hash = '#/strateji';
           } else if (ev.type === 'chart') {
             applyChart(ev.symbol, ev.actions || []);
           } else if (ev.type === 'answer') {

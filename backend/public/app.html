@@ -10,6 +10,10 @@
 <link rel="stylesheet" href="/assets/app.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css">
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/matchbrackets.min.js"></script>
 </head>
 <body>
 <aside class="sidebar">
@@ -20,6 +24,8 @@
     <a href="#/cift/PGSUS/THYAO" data-route="cift"><svg viewBox="0 0 24 24"><path d="M3 17c4-8 7-8 9-4s5 4 9-4"/><path d="M3 12c4-6 7-6 9-2s5 3 9-3" opacity=".5"/></svg><span>Çift</span></a>
     <a href="#/bildirimler" data-route="bildirimler"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7M9 8h3"/></svg><span>KAP</span></a>
     <a href="#/sinyaller" data-route="sinyaller"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>Sinyaller</span></a>
+    <a href="#/strateji" data-route="strateji"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-5 9a2 2 0 002 3h10a2 2 0 002-3l-5-9V3"/><path d="M7.5 15h9"/></svg><span>Strateji</span></a>
+    <a href="#/portfoy" data-route="portfoy"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M3 12h18"/></svg><span>Portföy</span></a>
     <a href="#/analiz" data-route="analiz"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg><span>Analiz</span></a>
     <a href="#/sistem" data-route="sistem"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>Sistem</span></a>
   </nav>
@@ -60,5 +66,9 @@
 <script src="/assets/draw.js"></script>
 <script src="/assets/app.js"></script>
 <script src="/assets/agent.js"></script>
+<script src="/assets/strategy/templates.js"></script>
+<script src="/assets/strategy/nlp.js"></script>
+<script src="/assets/lab.js"></script>
+<script src="/assets/paper.js"></script>
 </body>
 </html>

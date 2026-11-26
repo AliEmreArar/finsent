@@ -1,7 +1,7 @@
 # FinSent: agent devir dosyası (handoff)
 
 > Bu dosya, projeyi devralacak bir yapay zekâ ajanı ya da geliştirici için yazıldı. Projede ne var, neler yapıldı, neler denendi ve tutmadı, açık işler neler ve nelere dokunulmamalı, hepsi burada.
-> Son güncelleme: 2026-11-08 (Jarvis entegrasyonu).
+> Son güncelleme: 2026-11-25 (Strateji Laboratuvarı, bkz. §13).
 > Kavramların açıklamalı eğitim versiyonu [docs/EGITIM.md](docs/EGITIM.md) dosyasındadır.
 
 ---
@@ -62,7 +62,10 @@ docker compose exec airflow finsent seed   # veri: GitHub Release data-* (~730 M
 
 **Bellek:** Docker Desktop (WSL2) ~8 GB. `mem_limit` değerleri: airflow 5g, mysql 1536m. Hisse tahmin modelinin yeniden eğitimi ~3 GB kullanır. Eskiden VM'i kilitliyordu, çözümü slim float32 frame ve joblib kaydıydı. VM kilitlenirse: `wsl --shutdown` ve Docker Desktop'ı yeniden başlatın.
 
-**Testler:** `pipeline/.venv` içinde `python -m pytest pipeline/tests -q` çalıştırılır. 33 test var, hepsi geçiyor.
+**Testler:**
+- Python: `pipeline/.venv` içinde `python -m pytest pipeline/tests -q` (33 test).
+- Strateji motoru (JS): `node --test 'backend/tests/js/*.test.js'` (Node 18+, bağımlılık yok).
+- Strateji backend (PHP): `php backend/tests/php/run.php` (`backend/vendor` gerekir: `cd backend && composer install`).
 
 **Konteynere hızlı kod aktarımı:** airflow imajı `finsent` paketini site-packages'a kurar. İmajı yeniden derlemeden denemek için:
 
@@ -276,6 +279,8 @@ Açık kalanlar:
   - `#/cift`: çift analizi;
   - `#/bildirimler`: haber akışı ve etki;
   - `#/sinyaller`;
+  - `#/strateji`, `#/strateji/{id}`, `#/strateji/t-{şablon}`: Strateji Laboratuvarı (§13);
+  - `#/stratejiler`: kayıtlı stratejiler;
   - `#/analiz`: serbest metin analizi;
   - `#/sistem`: pipeline sağlığı ve veri kalitesi.
 - **Grafik:** TradingView Lightweight Charts v4.2. Atıf linki zorunlu, kaldırılmasın. Mumlar 15dk/1S/4S/G/H/A, para birimi ₺/$.
@@ -304,3 +309,75 @@ Açık kalanlar:
 - **Breadth hesabı:** cumartesi EURTRY satırları yüzünden boş dönüyordu. `MAX(trade_date)` artık enstrümanları hariç tutuyor.
 - **PHP ve MySQL:** tek tırnaklı PHP içinde MySQL `"instrument"` literal'i çift tırnakla yazılır.
 - **Hızlı sayfa geçişi:** null element hataları veriyordu. Çözüm: `$()` bulamazsa ayrık bir div döndürür.
+
+---
+
+## 13. Strateji Laboratuvarı (2026-11-25)
+
+Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir JavaScript'e çevirir, kod ekranda gösterilir ve düzenlenebilir, geçmiş verilerle sanal parayla test edilir.
+
+**Mimari kararı:** backtest **tarayıcıda, Web Worker içinde** çalışır, sunucuda değil. Böylece LLM'in veya kullanıcının yazdığı kod sunucuda çalışmaz (güvenlik) ve PHP'ye ağır hesap binmez. Worker'da `fetch`/`XMLHttpRequest`/`importScripts` kapatılır; sonsuz döngüde sayfa worker'ı öldürür (45 sn backtest, 5 dk tarama).
+
+| Dosya | Görev |
+|---|---|
+| `backend/public/assets/strategy/engine.js` | UMD (tarayıcı + Node). `ta` göstergeleri (sma, ema, rsi, macd, bollinger, atr, stochastic, adx, obv, highest/lowest, roc, zscore, ref, crossover/under), olay güdümlü günlük backtester, metrikler, `sweep` (parametre ızgarası), `walkForward` (eğitim/test ayrımı), `adjustCorporateActions` |
+| `strategy/worker.js` | Kodu worker'da çalıştırır: `inspect`, `backtest`, `sweep`, `walkforward` mesajları |
+| `strategy/templates.js` | 9 hazır strateji (SMA kesişimi, RSI dipten alım, Donchian/Turtle, MACD+trend, Bollinger, momentum rotasyonu, KAP haber duygusu, al-tut, düzenli birikim). Grok'a da örnek olarak gider |
+| `strategy/nlp.js` | Anahtar yoksa / Grok hata verirse: Türkçe metinden en yakın şablonu ve sayıları çıkaran kural tabanlı çevirici (zarar kes / kâr al / iz süren stop parametrelerini gerekirse koda enjekte eder) |
+| `assets/lab.js` | Arayüz (`window.pageLab`, `window.pageStrategies`). CodeMirror 5 (CDN, yüklenmezse düz textarea) |
+| `src/Controllers/StrategyController.php` | `GET /api/strategy/status`, `GET /api/strategy/data` (çoklu sembol, sütunsal; ısınma için 420 gün ek geçmiş; kıyas serisi; günlük KAP duygu), `GET /api/strategy/universe?n&as_of` (o tarihteki en likit hisseler: hayatta kalma yanılgısı yok), `POST /api/strategy/generate|fix|review`, `GET/POST /api/strategies`, `GET /api/strategies/{id}`, `POST /api/strategies/{id}/delete` |
+| `src/Services/StrategyAi.php` | Grok istemleri (`API_DOC` motorla senkron tutulmalı; PHP testi bunu denetler), json_schema yapılandırılmış çıktı, kural tabanlı `offlineReview` |
+| `sql/schema.sql` → `strategies`, `paper_accounts`, `paper_trades` | Kayıtlı stratejiler (kod, ayarlar, son sonuç özeti). Eski veritabanlarında controller tabloyu `CREATE TABLE IF NOT EXISTS` ile kendisi kurar |
+
+**Strateji API'si** (Grok'un yazdığı kod): `const strategy = { name, description, params: { k: { label, default, min, max, step } }, indicators(s, p, ta, sym), onBar(ctx, p) }`. Emirler `ctx.buy/sell/targetPercent/closeAll`, seçenekler `stopLoss/takeProfit/trailingStop/reason`. Tam liste: `StrategyAi::API_DOC` ve arayüzdeki "API" düğmesi.
+
+**Simülasyon kuralları (dürüstlük için önemli):**
+- Sinyal bar kapanışında, işlem **ertesi bar açılışında** (varsayılan; "sinyal kapanışı" seçeneği de var). Geçmişteki açılış fiyatı tahmini (= önceki kapanış), yani ertesi açılış pratikte sinyal kapanışıdır.
+- Komisyon ve kayma her iki yönde; tam sayı lot; nakit eksiye düşmez; yalnızca alım (long).
+- Stoplar bar içi yüksek/düşükle kontrol edilir; boşlukla açılışta açılış fiyatından çıkar; aynı barda stop ve hedef ikisi de değerse stop varsayılır (muhafazakâr).
+- **Sermaye işlemi düzeltmesi:** BIST günlük limiti ±%10 olduğundan gece −%30 / +%75 üzeri sıçramalar bedelsiz/bölünme sayılır ve geçmiş fiyatlar ölçeklenir (enstrümanlarda kapalı). Ham veri düzeltilmemiş olduğu için gereklidir.
+- KAP duygusu `event_returns.event_date` gününe (yoksa yayım gününe; 18:00 sonrası ertesi seansa) yazılır, işlem bir gün sonra olur: geleceği görme yok.
+- Al-tut kıyası aynı hisselerin eşit ağırlıklı al-tut'udur; ek olarak BIST 100 / gram altın / USD kıyası.
+
+**Arayüz özellikleri:** sohbetle yinelemeli düzenleme ("stop'u %5 yap"), hata satırı vurgusu ve "Grok ile düzelt", parametrelerden otomatik kaydırıcılar, TL/USD, en likit 10/20 sepeti, KPI'lar (CAGR, Sharpe, Sortino, maks. düşüş ve süresi, Calmar, kâr faktörü, piyasada kalma), sermaye ve düşüş eğrileri (log ölçek), fiyat grafiğinde AL/SAT işaretleri, "bugün ne yapardı?" sinyalleri, işlem listesi + CSV, aylık ısı haritası ve yıllık çubuklar, 1–2 parametre taraması (ısı haritası + aşırı uyum notu), eğitim/test, Grok (yoksa kural tabanlı) değerlendirme, kaydetme/listeleme. Taslak `localStorage`'da tutulur.
+
+**Test ortamı notu:** Bulut oturumunda MariaDB kurulup snapshot tabloları (market_daily, disclosures, sentiment, event_returns, companies) yüklendi ve `php -S` ile Playwright uçtan uca testi yapıldı (CDN kütüphaneleri npm'den yerel servis edildi). Gerçek THYAO verisiyle SMA 50/200 (2021-11 → 2026-11): strateji yıllık +%52, al-tut +%76, BIST 100 +%45. Kazancın neredeyse tamamı tek işlemden geldi, sonra üç zararlı işlem oldu. Bu da al-tut'un neden zor geçildiğini gösteriyor.
+
+**Nakit faizi ve risk:**
+- "Nakit faizi (yıllık %)" ayarı (yalnızca TL'de): boştaki nakit takvim günü başına bileşik faiz kazanır. Aynı oranla "Mevduat" kıyas eğrisi çizilir.
+- Sharpe ve Sortino, bu oranın üzerindeki **fazla getiriyle** hesaplanır; faizsizde ham getiriyle. Saf mevduatın Sharpe'ı ≈ 0.
+- "Risk (Monte Carlo)" sekmesi: günlük getiriler 20 günlük bloklarla 1.000 kez yeniden örneklenir. Sonuçta p5/p50/p95 getiri, zarar olasılığı, olası en büyük düşüş, 60 örnek yol ve dağılım histogramı gösterilir.
+
+**Sanal portföy (`#/portfoy`, `PaperController`, `assets/paper.js`):**
+- Tablolar: `paper_accounts` (başlangıç bakiyesi, komisyon) ve `paper_trades`. Pozisyonlar işlemlerden yeniden oynatılarak hesaplanır (`replay`, ortalama maliyet, gerçekleşen K/Z).
+- Emir fiyatı: Yahoo gecikmeli fiyatı (yalnızca son kapanıştan yeniyse), yoksa son kapanış.
+- Değerleme günlük kapanışla yapılır; BIST 100 ile kıyaslanır.
+- API: `GET/POST /api/paper`, `GET /api/paper/{id}`, `POST /api/paper/{id}/order` (`preview: true` ile önizleme), `/reset`, `/delete`.
+- Laboratuvarda "Sanal portföye uygula" düğmesi bugünün sinyallerini portföye emir olarak gönderir.
+
+**Asistan entegrasyonu:**
+- Yeni ajan araçları: `open_strategy_lab` (NDJSON `type: lab` olayı; tarayıcı `#/strateji`'ye gider, açıklamayı koda döktürür ve test eder), `get_saved_strategies`, `get_paper_portfolio`.
+- Asistan → laboratuvar akışı sahte bir xAI sunucusuyla uçtan uca test edildi.
+
+**Ek özellikler (2. tur):**
+- "Tutarlılık" sekmesi (`engine.rollingWindows`): her günü başlangıç sayıp 1 ve 3 yıllık kayan pencerelerde al-tut'u geçme oranını, kârlı pencere oranını ve en kötü/ortanca/en iyi pencereyi gösterir. Kayan 1 yıllık getiri grafiği de var.
+- Dışa/içe aktarma: `.finsent.json` (`format: finsent-strategy`, kod + ayarlar) veya düz `.js` dosyası. Dosya adları ASCII'ye çevrilir; Chromium ASCII olmayan adları "download" olarak kaydedebiliyor.
+- Kayıtlı stratejiler sayfasında birden fazla strateji seçilip ortak bir dönemde yan yana test edilir (logaritmik ölçekte, 100'e endekslenmiş eğriler).
+- Zaman dilimi: günlük / haftalık / aylık (`engine.aggregateBars`, `config.timeframe`, `ctx.timeframe`). Haftalık mum haftanın son işlem günüyle etiketlenir, böylece emirler dönem kapandıktan sonra gerçekleşir. Grok şeması `timeframe` alanı döndürür. Veri ucu `warmup_days` ile daha uzun ısınma geçmişi verir (haftalık 1800, aylık 4500 gün). Düşüş süresi takvim günüyle ölçülür.
+- Kod kontrolü ve backtest ayrı worker'larda çalışır; yazarken yapılan kontrol uzun bir taramayı öldürmez.
+
+- Endekse göre ölçümler (`engine.relativeMetrics`): beta, yıllık Jensen alfası, korelasyon, takip hatası, bilgi oranı. "Ayrıntılı ölçümler"de ve Grok değerlendirme raporunda yer alır.
+- Risk tabanlı büyüklük: `ctx.buy(sym, { riskPercent: 1, stopLoss: 0.05 })` stop olursa sermayenin %1'ini kaybettirecek büyüklükte alır (nakitle sınırlı).
+- Push 403 verdiği için kullanıcıya `finsent-strateji-lab.bundle` (git bundle) gönderildi; GitHub erişimi düzelince commit'ler doğrudan push'lanmalı.
+
+- Otomatik düzeltme: Grok'un ürettiği kod derlenmez veya ilk backtest'te çalışma hatası verirse hata mesajıyla `/api/strategy/fix` **bir kez** otomatik çağrılır, sonra test yeniden çalışır (sohbette "Kod hata verdi, Grok otomatik düzeltti" görünür). Zaman aşımı (sonsuz döngü) otomatik düzeltilmez. Sahte xAI sunucusuyla uçtan uca test edildi.
+
+**Kod incelemesi (bağımsız ajan) ve düzeltmeler:**
+- *Yeniden dengeleme:* `targetPercent` emirlerinin yönü (azaltma/artırma) gerçekleşme anında belirlenir. Azaltmalar satışlarla birlikte önce çalışır (`executeBatch`). Önceden rotasyon stratejilerinde nakit atıl kalıyordu ve sonuçlar yanlıştı.
+- *Stop değerleri:* `normPct` ile stop/hedef değerleri tek yerde yorumlanır: `1` = %1, `0.05` = %5. `setStop` de yüzde kabul eder. `riskPercent` stop olmadan emri atlar ve uyarı verir; önceden tüm nakitle alım yapıyordu.
+- *Paylaşılan durum:* `ta` dondurulmuştur. `sweep` her kombinasyonu yeniden derler, böylece üst düzey değişkenler kombinasyonlar arasında taşınmaz. `fill: close` modunda da "bugünün sinyalleri" dolu gelir. Sinyaller `side: 'target'`, `targetPercent`, `shares` ve `amount` taşır; "Sanal portföye uygula" bunları aynı anlamla emre çevirir.
+- *Sandbox:* Strateji kodu `/assets/strategy/sandbox.js` içinde çalışır. Bu dosya `public/index.php` tarafından engine.js ile worker.js birleştirilerek üretilir ve `CSP: default-src 'none'; script-src 'unsafe-eval'; connect-src 'none'; worker-src 'none'` başlığıyla sunulur. fetch, XHR, iç içe Worker, EventSource ve `import()` engellidir; bu, tarayıcıda kaçış denemeleriyle doğrulandı. Worker'ın `postMessage`'ı strateji kodundan gizlenir.
+- *XSS:* Parametreler worker'da yalnızca sayı ve mantıksal değer olarak dışarı çıkar ve öznitelikler sayıya zorlanır. Kayıtlı listede `trades` biçimlendirilir.
+- *Sanal portföy:* Emirler hesap satırı kilitlenerek (`FOR UPDATE`) işlemde yazılır. Fiyat kaynağı etiketi sütuna sığacak şekilde kısaltıldı.
+
+**Açık fikirler:** gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).
