@@ -23,6 +23,7 @@ FinSent brings Borsa Istanbul market data and KAP (Kamuyu Aydınlatma Platformu)
                                     │   score_sentiment (Grok fast model | Claude | lexicon) ─► curated/sentiment │
                                     │   detect_patterns ─► curated/patterns                                      │
                                     │   load_serving_db ─► MySQL ──► PHP API + dashboard (:8080)                 │
+                                    │   paper_follow ─► strategy-runner (no network) ─► paper orders              │
                                     │   social_sentiment (Grok x_search) · market_brief (Grok web + X search)    │
                                     └───────────────┬────────────────────────────────────────────────────────────┘
                                                     ▼ trigger
@@ -172,7 +173,9 @@ Describe a trading idea in plain Turkish ("RSI 30'un altına inince al, 70 üst�
 - **Simulation:** signals at the close, fills at the next open, commission and slippage per side, whole lots, stop-loss / take-profit / trailing stops, long-only. Bonus issues and splits are back-adjusted: BIST's daily limit is ±10%, so a larger overnight gap is treated as a corporate action. KAP sentiment is available per bar without look-ahead.
 - **Settings:** stocks (or "most liquid N as of the start date", which avoids survivorship bias), period, capital, costs, TL/USD, benchmark (BIST 100, gram gold, USD) and sliders built from the strategy's `params`.
 - **Results:** CAGR, Sharpe, Sortino, max drawdown and its length, win rate, profit factor and exposure, each versus buy-and-hold and the benchmark. Also equity and drawdown curves, trades on the price chart, today's signals, the trade list with CSV export, a monthly heatmap, a parameter sweep heatmap with an overfitting check, an in-sample/out-of-sample test, and saved strategies (`strategies` table, `#/stratejiler`).
-- **Tests:** `node --test 'backend/tests/js/*.test.js'` and `php backend/tests/php/run.php`.
+- **Virtual portfolio (`#/portfoy`):** trade with virtual TL at the latest price and track P&L against BIST 100. You can link a saved strategy to a portfolio. Its signals then appear on the page, and every evening the DAG task `paper_follow` applies them automatically.
+- **Server-side runs:** the daily task never executes strategy code in Airflow. It writes a job file for the `strategy-runner` service, which runs the code in an empty `vm` context inside a container with no network, no secrets, no capabilities and a read-only filesystem. Run it by hand with `finsent paper-follow`.
+- **Tests:** `node --test 'backend/tests/js/*.test.js'`, `php backend/tests/php/run.php` and `pytest pipeline/tests/test_paper_follow.py`.
 
 ## Grok agent (right-hand panel)
 

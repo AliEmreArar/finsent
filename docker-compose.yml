@@ -22,6 +22,8 @@ x-common-env: &common-env
   XAI_FAST_MODEL: ${XAI_FAST_MODEL:-grok-4.20-0309-non-reasoning}
   XAI_STRATEGY_MODEL: ${XAI_STRATEGY_MODEL:-}
   FINSENT_LLM_WORKERS: ${FINSENT_LLM_WORKERS:-8}
+  FINSENT_WEB_URL: http://web
+  FINSENT_STRATEGY_JOBS: /jobs
   JARVIS_URL: ${JARVIS_URL:-}
   JARVIS_TOKEN: ${JARVIS_TOKEN:-}
 
@@ -127,12 +129,37 @@ services:
       - ./airflow/dags:/opt/airflow/dags:ro
       - ./data:/opt/finsent/data          # writable: Yahoo market updates land in data/market/
       - airflow-logs:/opt/airflow/logs
+      - strategy-jobs:/jobs               # job files for the strategy-runner service (paper_follow)
     depends_on:
       mysql: {condition: service_healthy}
       s3: {condition: service_healthy}
       mlflow: {condition: service_started}
+      strategy-runner: {condition: service_started}   # creates the job folders in the shared volume
+
+  # Runs saved Strategy Lab strategies for the daily paper-portfolio task. Strategy code is
+  # LLM- or user-written, so this container gets no network, no secrets, no capabilities and a
+  # read-only filesystem; it talks to Airflow only through files in the strategy-jobs volume.
+  strategy-runner:
+    image: node:22-alpine
+    command: ["node", "/app/strategy-runner/runner.js"]
+    environment:
+      JOBS_DIR: /jobs
+      ENGINE_DIR: /app/strategy
+      STRATEGY_TIMEOUT_MS: "60000"
+    volumes:
+      - ./strategy-runner:/app/strategy-runner:ro
+      - ./backend/public/assets/strategy:/app/strategy:ro
+      - strategy-jobs:/jobs
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    pids_limit: 64
+    restart: unless-stopped
 
 volumes:
+  strategy-jobs:
   mysql-data:
   s3-data:
   mlflow-data:

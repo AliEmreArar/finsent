@@ -63,7 +63,7 @@ docker compose exec airflow finsent seed   # veri: GitHub Release data-* (~730 M
 **Bellek:** Docker Desktop (WSL2) ~8 GB. `mem_limit` değerleri: airflow 5g, mysql 1536m. Hisse tahmin modelinin yeniden eğitimi ~3 GB kullanır. Eskiden VM'i kilitliyordu, çözümü slim float32 frame ve joblib kaydıydı. VM kilitlenirse: `wsl --shutdown` ve Docker Desktop'ı yeniden başlatın.
 
 **Testler:**
-- Python: `pipeline/.venv` içinde `python -m pytest pipeline/tests -q` (33 test).
+- Python: `pipeline/.venv` içinde `python -m pytest pipeline/tests -q` (33 + 6 test).
 - Strateji motoru (JS): `node --test 'backend/tests/js/*.test.js'` (Node 18+, bağımlılık yok).
 - Strateji backend (PHP): `php backend/tests/php/run.php` (`backend/vendor` gerekir: `cd backend && composer install`).
 
@@ -385,5 +385,14 @@ Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir 
 - Sayfa her açıldığında strateji kendi ayarlarıyla son 1 yıl + ısınma verisinde tarayıcıda çalıştırılır (`window.labSignalsFor`) ve bugünün sinyalleri listelenir.
 - "Sinyalleri uygula", laboratuvarla ortak `window.labApplySignals` fonksiyonunu kullanır: hedef ağırlık, kısmi satış ve tutar aynı anlamla emre çevrilir.
 - Aynı gün aynı stratejiden işlem varsa "bugün zaten uygulandı" gösterilir ve düğme kapatılır.
+
+**Sunucu tarafında günlük takip (tarayıcı kapalıyken):**
+- Yeni `strategy-runner` servisi (`node:22-alpine`, `strategy-runner/runner.js`): `network_mode: none`, `read_only`, `cap_drop: ALL`, `no-new-privileges`, 512 MB ve 64 süreç sınırı. Veritabanı şifresi yok.
+- Airflow ile tek bağlantısı `strategy-jobs` volume'üdür. Airflow `in/<id>.json` yazar (geçici dosya + rename), runner `out/<id>.json` döndürür.
+- Strateji kodu Node `vm` ile **boş bir bağlamda** çalışır: içeri yalnızca JSON metni girer; `process`, `require`, zamanlayıcı ve dosya sistemi yoktur; zaman aşımı 60 sn. Testlerde constructor üzerinden kaçış denemeleri de doğrulandı.
+- Airflow görevi `paper_follow` (`load_serving_db`'den sonra) `finsent.paper_follow.run()`'ı çağırır. Bağlı her hesap için PHP API'den strateji, veri ve hesabı alır, runner'a iş gönderir, dönen emirleri `/api/paper/{id}/order` ile verir (önce satışlar). Aynı gün aynı stratejiden işlem varsa atlar. Elle çalıştırma: `finsent paper-follow`.
+- Sinyal→emir çevirisi `assets/strategy/apply.js` ile laboratuvar, portföy sayfası ve runner'da ortaktır.
+- Yerelde gerçek runner + PHP + MariaDB ile entegrasyon testi yapıldı (hedef %40 → %39,8; ikinci çalıştırma atlandı). Docker daemon olmadığı için compose servisi bu oturumda ayağa kaldırılamadı. **İlk kurulumda `docker compose build airflow && docker compose up -d` gerekir** (yeni modül imaja girer, runner servisi başlar).
+- Testler: `backend/tests/js/runner.test.js`, `pipeline/tests/test_paper_follow.py`.
 
 **Açık fikirler:** gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).

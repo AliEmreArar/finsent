@@ -669,32 +669,15 @@
   // sells, fixed amounts) and sends them, sells first. Shared by the lab and the portfolio page.
   async function applySignalsTo(accountId, signals, symbolCount, label) {
     const full = await api(`/paper/${accountId}`);
-    const held = (sym) => full.positions.find((p) => p.symbol === sym);
-    const toOrder = (s) => {
-      const h = held(s.sym);
-      if (s.side === 'sell') {
-        if (!h) return null;
-        if (s.shares) return { side: 'sell', shares: s.shares };
-        if (s.percent) return { side: 'sell', shares: Math.floor((h.shares * s.percent) / 100) };
-        return { side: 'sell' };
-      }
-      if (s.side === 'target') {
-        const diff = (full.value * s.targetPercent) / 100 - (h ? h.value : 0);
-        if (Math.abs(diff) < full.value * 0.002) return null;   // already at target
-        return diff > 0 ? { side: 'buy', amount: Math.floor(diff) } : (h ? { side: 'sell', shares: Math.floor(-diff / h.price) } : null);
-      }
-      if (s.shares) return { side: 'buy', shares: s.shares };
-      if (s.amount) return { side: 'buy', amount: Math.floor(s.amount) };
-      return { side: 'buy', amount: Math.floor((full.value * (s.percent ?? 100 / Math.max(1, symbolCount))) / 100) };
-    };
-    const orders = signals.map((s) => ({ s, o: toOrder(s) })).filter((x) => x.o && !(x.o.shares === 0));
-    orders.sort((a, b) => (a.o.side === 'sell' ? 0 : 1) - (b.o.side === 'sell' ? 0 : 1));   // sells fund buys
+    // shared with the server-side runner (assets/strategy/apply.js), so both apply signals identically
+    const orders = window.FinSentApply.signalsToOrders(signals, full, symbolCount);
     const done = [], failed = [], skipped = signals.length - orders.length;
-    for (const { s, o } of orders) {
+    for (const o of orders) {
+      const { reason, ...order } = o;
       try {
-        const res = await window.paperApi.order(accountId, { symbol: s.sym, ...o, note: `${label}: ${s.reason}`.slice(0, 250) });
+        const res = await window.paperApi.order(accountId, { ...order, note: `${label}: ${reason}`.slice(0, 250) });
         done.push(`${res.side === 'buy' ? 'AL' : 'SAT'} ${res.shares} ${res.symbol}`);
-      } catch (e) { failed.push(`${s.sym}: ${e.message}`); }
+      } catch (e) { failed.push(`${o.symbol}: ${e.message}`); }
     }
     return { done, failed, skipped, account: full };
   }

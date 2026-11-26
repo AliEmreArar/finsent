@@ -189,6 +189,14 @@ def finsent_ingest():
 
         return jp.push(get_settings())
 
+    @task(retries=1, execution_timeout=timedelta(minutes=30))
+    def paper_follow() -> dict:
+        # paper portfolios linked to a saved strategy: apply today's signals at the fresh closes.
+        # Strategy code runs in the isolated strategy-runner container, not here.
+        from finsent import paper_follow as pf
+
+        return pf.run()
+
     @task.short_circuit
     def lakehouse_enabled(**context) -> bool:
         return bool(context["params"].get("trigger_lakehouse", True))
@@ -209,6 +217,7 @@ def finsent_ingest():
     loaded >> lakehouse_enabled() >> trigger
     fc = direction_forecast(win)
     loaded >> fc
+    loaded >> paper_follow()
     win >> collect_intraday()
     gfc = gold_forecast(win)
     win >> refresh_instruments() >> gfc

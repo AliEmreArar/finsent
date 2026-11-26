@@ -136,10 +136,15 @@ def main(argv: list[str] | None = None) -> None:
     sd.add_argument("--keep-downloads", action="store_true")
 
     sub.add_parser("jarvis-push", help="upload a compact snapshot to the Jarvis assistant (JARVIS_URL/JARVIS_TOKEN)")
+    sub.add_parser("paper-follow", help="apply today's signals of linked strategies to their paper portfolios (needs the strategy-runner service)")
 
     args = ap.parse_args(argv)
     settings = get_settings()
 
+    if args.cmd == "paper-follow":
+        from .paper_follow import run as follow
+        print(json.dumps(follow(), indent=2, default=str))
+        return
     if args.cmd == "jarvis-push":
         from .jarvis_push import push
         print(json.dumps(push(settings), indent=2, default=str))
