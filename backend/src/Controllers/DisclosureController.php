@@ -7,6 +7,7 @@ namespace FinSent\Controllers;
 use FinSent\Db;
 use FinSent\Http;
 use FinSent\HttpError;
+use FinSent\Services\NewsAlert;
 
 final class DisclosureController
 {
@@ -62,6 +63,12 @@ final class DisclosureController
             $r['key_points'] = $r['key_points'] !== null ? json_decode((string) $r['key_points'], true) : [];
         }
         return ['total' => $total, 'limit' => $limit, 'offset' => $offset, 'items' => $rows];
+    }
+
+    /** @return array<string,mixed> */
+    public static function newsAlert(string $symbol): array
+    {
+        return NewsAlert::forSymbol(Http::symbol($symbol));
     }
 
     /** @return array<string,mixed> */

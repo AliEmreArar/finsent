@@ -290,6 +290,7 @@ async function pageStock(v, sym) {
       <div><div class="muted small" id="st-name">&nbsp;</div><h1>${esc(sym)}</h1></div>
       <div style="text-align:right"><div class="hero-value num" id="st-price">–</div><div class="hero-meta" style="justify-content:flex-end" id="st-chg"></div></div>
     </div>
+    <div id="st-alert"></div>
     <div class="stats reveal" id="st-stats">${'<div class="stat"><div class="skeleton" style="height:38px"></div></div>'.repeat(6)}</div>
     <div class="card reveal" style="margin-top:16px;animation-delay:.05s">
       <div class="card-head" style="flex-wrap:wrap"><h2>Fiyat</h2>
@@ -402,6 +403,7 @@ async function pageStock(v, sym) {
     return;
   }
   loadForecast(sym);
+  loadNewsAlert(sym);
   loadSocial(sym);
   $('#soc-go').onclick = () => runSocial(sym);
   $('#ins-go').onclick = () => runInsight(sym);
@@ -422,37 +424,53 @@ async function pageStock(v, sym) {
 }
 
 
-const GOLD_FC = new Set(['ALTIN', 'XAUUSD']);
+const GOLD_FC = new Set(['ALTIN', 'XAUUSD', 'GUMUS', 'XAGUSD']);
+const priceDec = (p, currency) => (currency === 'USD' && Math.abs(p) < 100 ? 3 : 2);
 const HZ_NAME = { 1: 'Yarın', 5: '1 hafta', 20: '1 ay' };
+// Probability bands (p05/p16/p50/p84/p95 per horizon): shared by the gold and stock forecast cards.
+function rangeBlock(horizons, close, cur, d, btnId) {
+  const lo = Math.min(close, ...horizons.map((h) => h.p05)), hi = Math.max(close, ...horizons.map((h) => h.p95));
+  const x = (v) => ((v - lo) / (hi - lo || 1)) * 100;
+  const cov = (h) => (h.coverage_90 === null || h.coverage_90 === undefined ? '' : `<div class="gfc-c note">Test kapsaması <b>%${num(h.coverage_90 * 100, 0)}</b> <span class="muted">(hedef %90)</span></div>`);
+  return `<div class="gfc-rows">${horizons.map((h) => `
+      <div class="gfc-row">
+        <div class="gfc-h"><b>${HZ_NAME[h.days] || h.days + ' gün'}</b><span class="note">${h.days} işlem günü</span></div>
+        <div class="gfc-track" title="Açık bant: %90 olasılık · koyu bant: %68 olasılık · çizgi: medyan · nokta: bugünkü fiyat">
+          <i class="b90" style="left:${x(h.p05)}%;width:${x(h.p95) - x(h.p05)}%"></i>
+          <i class="b68" style="left:${x(h.p16)}%;width:${x(h.p84) - x(h.p16)}%"></i>
+          <i class="med" style="left:${x(h.p50)}%"></i><i class="now" style="left:${x(close)}%"></i>
+        </div>
+        <div class="gfc-n num"><div>${cur}${num(h.p16, d)} – ${cur}${num(h.p84, d)} <span class="note">%68</span></div>
+          <div class="note">${cur}${num(h.p05, d)} – ${cur}${num(h.p95, d)} · %90</div></div>
+        ${cov(h)}
+      </div>`).join('')}
+    </div>
+    <div class="gfc-legend note"><span><i class="sw b90"></i>%90 olasılık</span><span><i class="sw b68"></i>%68 olasılık</span><span><i class="sw med"></i>medyan</span><span><i class="sw now"></i>bugün ${cur}${num(close, d)}</span>
+      <button class="btn" id="${btnId}" style="margin-left:auto;padding:4px 10px;font-size:12px">1 aylık aralığı grafikte göster</button></div>`;
+}
+function drawRange(h20, currency) {
+  const S = window.__stock;
+  if (!S || !h20) return;
+  S.overlays = (S.overlays || []).filter((o) => !o.gold);
+  S.apply([...(S.st.currency !== currency ? [{ type: 'set_view', currency }] : []),
+    { type: 'hline', price: h20.p95, label: '1 ay %95', kind: 'resistance', gold: 1 }, { type: 'hline', price: h20.p84, label: '1 ay %84', kind: 'target', gold: 1 },
+    { type: 'hline', price: h20.p16, label: '1 ay %16', kind: 'target', gold: 1 }, { type: 'hline', price: h20.p05, label: '1 ay %5', kind: 'support', gold: 1 }]);
+}
 async function renderGoldForecast(sym) {
   const box = $('#gfc');
   let f;
   try { f = await api(`/forecast/${sym}`); } catch { box.innerHTML = '<div class="empty">Tahmin henüz üretilmedi</div>'; return; }
   if (f.version !== 'gold-v1') { box.innerHTML = '<div class="empty">Tahmin henüz üretilmedi</div>'; return; }
   const cur = f.currency === 'USD' ? '$' : '₺', d = f.close > 1000 ? 0 : 2;
-  const lo = Math.min(...f.horizons.map((h) => h.p05)), hi = Math.max(...f.horizons.map((h) => h.p95));
-  const x = (v) => ((v - lo) / (hi - lo || 1)) * 100;
   const v = f.vol, h20 = f.horizons.find((h) => h.days === 20) || f.horizons.at(-1);
   const dirAuc = f.horizons.map((h) => h.direction_auc).filter((a) => a !== null && a !== undefined);
   const aucTxt = dirAuc.length ? dirAuc.map((a) => num(a, 2)).join(' / ') : '–';
   const unit = (r) => r.unit === 'pct' ? pct(r.value, 1) : r.unit === 'bp' ? `${r.value > 0 ? '+' : ''}${num(r.value * 100, 0)} bp` : num(r.value, r.unit === 'z' ? 2 : 1);
   const rules = Object.entries(f.rules || {});
+  const silver = f.metal === 'SILVER', metalDat = silver ? 'gümüşe' : 'altına';
+  const bh = (f.rules || {})['Al-tut'], beat = bh ? rules.filter(([k, r]) => k !== 'Al-tut' && r.cagr > bh.cagr).map(([k]) => k) : [];
   box.innerHTML = `
-    <div class="gfc-rows">${f.horizons.map((h) => `
-      <div class="gfc-row">
-        <div class="gfc-h"><b>${HZ_NAME[h.days] || h.days + ' gün'}</b><span class="note">${h.days} işlem günü</span></div>
-        <div class="gfc-track" title="Açık bant: %90 olasılık · koyu bant: %68 olasılık · çizgi: medyan · nokta: bugünkü fiyat">
-          <i class="b90" style="left:${x(h.p05)}%;width:${x(h.p95) - x(h.p05)}%"></i>
-          <i class="b68" style="left:${x(h.p16)}%;width:${x(h.p84) - x(h.p16)}%"></i>
-          <i class="med" style="left:${x(h.p50)}%"></i><i class="now" style="left:${x(f.close)}%"></i>
-        </div>
-        <div class="gfc-n num"><div>${cur}${num(h.p16, d)} – ${cur}${num(h.p84, d)} <span class="note">%68</span></div>
-          <div class="note">${cur}${num(h.p05, d)} – ${cur}${num(h.p95, d)} · %90</div></div>
-        <div class="gfc-c note">Test kapsaması <b>%${num(h.coverage_90 * 100, 0)}</b> <span class="muted">(hedef %90)</span></div>
-      </div>`).join('')}
-    </div>
-    <div class="gfc-legend note"><span><i class="sw b90"></i>%90 olasılık</span><span><i class="sw b68"></i>%68 olasılık</span><span><i class="sw med"></i>medyan</span><span><i class="sw now"></i>bugün ${cur}${num(f.close, d)}</span>
-      <button class="btn" id="gfc-draw" style="margin-left:auto;padding:4px 10px;font-size:12px">1 aylık aralığı grafikte göster</button></div>
+    ${rangeBlock(f.horizons, f.close, cur, d, 'gfc-draw')}
     <div class="stats" style="margin:18px 0 16px">
       <div class="stat"><div class="l">Beklenen oynaklık (yıllık)</div><div class="v num">${pct(v.forecast_ann, 1, false)}</div>
         <div class="d">son 5 yıl yüzdelik dilimi: ${num(v.pctile_5y * 100, 0)}</div></div>
@@ -461,28 +479,23 @@ async function renderGoldForecast(sym) {
     </div>
     <div class="gfc-honest"><b>Yön tahmini: güvenilir bir sinyal yok.</b> 28 makro ve teknik göstergeyle eğitilen yön modelleri (lojistik regresyon, gradient boosting)
       2012'den beri her yıl ileri yürüyerek test edildi. AUC ${aucTxt} (yarın / 1 hafta / 1 ay; 0,50 yazı-tura demek). Bu yüzden ok yerine aralık gösteriyoruz.
-      Altında tahmin edilebilen şey fiyatın <i>ne kadar</i> oynayacağı, <i>hangi yöne</i> gideceği değil.</div>
+      ${silver ? 'Gümüşte' : 'Altında'} tahmin edilebilen şey fiyatın <i>ne kadar</i> oynayacağı, <i>hangi yöne</i> gideceği değil.</div>
     <div class="grid g-2" style="margin-top:18px">
       <div><div class="note" style="margin-bottom:8px">Makro tablo: bugünkü değer, son 5 yıldaki yeri</div>
         <table class="tbl"><tbody>${(f.drivers || []).map((r) => `<tr><td>${esc(r.label)}</td><td class="num">${unit(r)}</td>
           <td><div class="range-bar" style="margin:6px 0;min-width:70px"><i style="left:${r.pctile_5y * 100}%"></i></div></td>
-          <td>${r.tilt ? `<span class="pill ${r.tilt === 'destek' ? 'pos' : 'neg'}">${r.tilt === 'destek' ? 'altına destek' : 'altına baskı'}</span>` : '<span class="note">normal</span>'}</td></tr>`).join('')}</tbody></table>
-        <p class="note" style="margin:8px 0 0">"Destek / baskı" ders kitabı ilişkisidir (güçlü dolar ve yükselen faiz baskı yapar). Kısa vadeli yön için güvenilir değildir.</p></div>
+          <td>${silver ? '<span class="note">–</span>' : r.tilt ? `<span class="pill ${r.tilt === 'destek' ? 'pos' : 'neg'}">${r.tilt === 'destek' ? `${metalDat} destek` : `${metalDat} baskı`}</span>` : '<span class="note">normal</span>'}</td></tr>`).join('')}</tbody></table>
+        <p class="note" style="margin:8px 0 0">${silver ? 'Destek / baskı etiketleri altının ders kitabı ilişkilerine göre tanımlı; gümüş risk dönemlerinde altından farklı davranabildiği için gösterilmiyor. ' : ''}"Destek / baskı" ders kitabı ilişkisidir (güçlü dolar ve yükselen faiz baskı yapar). Kısa vadeli yön için güvenilir değildir.</p></div>
       <div><div class="note" style="margin-bottom:8px">Basit kurallar · 2012–2026, %0,05 işlem maliyetiyle</div>
         <table class="tbl"><thead><tr><th>Kural</th><th>Yıllık</th><th>Sharpe</th><th>En kötü düşüş</th><th>Piyasada</th></tr></thead><tbody>
         ${rules.map(([k, r]) => `<tr${k === 'Al-tut' ? ' class="hl"' : ''}><td>${esc(k)}</td><td class="num ${dirCls(r.cagr)}">${pct(r.cagr, 1)}</td><td class="num">${num(r.sharpe, 2)}</td>
           <td class="num down">${pct(r.maxdd, 0)}</td><td class="num">${pct(r.time_in_market, 0, false)}</td></tr>`).join('')}</tbody></table>
-        <p class="note" style="margin:8px 0 0">Hiçbir zamanlama kuralı al-tut stratejisini geçemedi. Bazıları en kötü düşüşü azalttı, ama getiriden daha fazlasını kaybettirdi.</p></div>
+        <p class="note" style="margin:8px 0 0">${beat.length
+          ? `${beat.map(esc).join(', ')} bu dönemde al-tut'u geçti. Aynı testte yön modelleri yazı-tura çıktığı için bunu kalıcı bir avantaj değil, olası şans olarak okuyun.`
+          : 'Hiçbir zamanlama kuralı al-tut stratejisini geçemedi. Bazıları en kötü düşüşü azalttı, ama getiriden daha fazlasını kaybettirdi.'}</p></div>
     </div>
     <p class="note" style="margin:12px 0 0">${esc(f.model.range)}. Veri: ${fdate(f.as_of)} kapanışı. ${esc(f.disclaimer)}</p>`;
-  $('#gfc-draw').onclick = () => {
-    const S = window.__stock;
-    if (!S) return;
-    S.overlays = (S.overlays || []).filter((o) => !o.gold);
-    S.apply([...(S.st.currency !== f.currency ? [{ type: 'set_view', currency: f.currency }] : []),
-      { type: 'hline', price: h20.p95, label: '1 ay %95', kind: 'resistance', gold: 1 }, { type: 'hline', price: h20.p84, label: '1 ay %84', kind: 'target', gold: 1 },
-      { type: 'hline', price: h20.p16, label: '1 ay %16', kind: 'target', gold: 1 }, { type: 'hline', price: h20.p05, label: '1 ay %5', kind: 'support', gold: 1 }]);
-  };
+  $('#gfc-draw').onclick = () => drawRange(h20, f.currency);
 }
 
 async function renderGold(sym) {
@@ -569,7 +582,7 @@ function drawPrice(m) {
     timeScale: { borderVisible: false, timeVisible: intraday, secondsVisible: false },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal,
       vertLine: { color: 'rgba(255,255,255,.18)', labelBackgroundColor: '#18181b' }, horzLine: { color: 'rgba(255,255,255,.18)', labelBackgroundColor: '#18181b' } },
-    localization: { locale: 'tr-TR', priceFormatter: (p) => `${num(p, m.currency === 'USD' ? 3 : 2)}` },
+    localization: { locale: 'tr-TR', priceFormatter: (p) => `${num(p, priceDec(p, m.currency))}` },
   });
   const up = css('--up'), down = css('--down');
   const bars = m.bars.filter((b) => b.close !== null);
@@ -614,7 +627,7 @@ function drawPrice(m) {
     if (!b) return;
     const ch = b.close / b.open - 1;
     const ev = evByDate[t] || [];
-    const d = m.currency === 'USD' ? 3 : 2;
+    const d = priceDec(b.close, m.currency);
     legend.innerHTML = `<span>${label(t)}</span><span>A <b>${cur}${num(b.open, d)}</b></span><span>Y <b>${num(b.high, d)}</b></span>
       <span>D <b>${num(b.low, d)}</b></span><span>K <b>${cur}${num(b.close, d)}</b></span><span class="${dirCls(ch)}">${arrow(ch)} ${pct(ch)}</span>
       ${ev.length ? `<span style="color:var(--accent-text)">${ev.length} KAP bildirimi: ${esc((ev[0].subject || '').slice(0, 60))}</span>` : ''}`;
@@ -635,6 +648,24 @@ async function loadQuote(sym, stats) {
   }
 }
 
+// Strongly negative KAP disclosure (score <= -0.7) in the last 20 trading days: the one news signal
+// that held up in the event study (about -1.6% vs BIST 100 over 20 days), shown with its evidence.
+async function loadNewsAlert(sym) {
+  let a;
+  try { a = await api(`/news-alert/${sym}`); } catch { return; }
+  const box = $('#st-alert');
+  // the user may have moved to another stock (or page) while the request was in flight
+  const here = decodeURIComponent(location.hash.split('/')[2] || '').toUpperCase();
+  if (!a.active || !box || !box.isConnected || here !== sym) return;
+  const st = a.study, top = a.items[0];
+  box.innerHTML = `<div class="news-alert reveal">
+    <span class="pill neg">Olumsuz KAP bildirimi</span>
+    <div style="flex:1;min-width:0"><div class="t">${esc(top.subject || 'Bildirim')} <span class="muted small">· ${fdate(top.event_date)} · ${top.trading_days_ago} işlem günü önce${a.items.length > 1 ? ` · +${a.items.length - 1} bildirim daha` : ''}</span></div>
+      <div class="note">${esc((top.key_points || []).slice(0, 2).join(' · ') || top.summary || '')}</div>
+      <div class="note" style="margin-top:4px">Geçmişte böyle güçlü olumsuz bildirimlerden sonra hisseler 20 işlem gününde BIST 100'ün ortalama
+        <b class="down">${pct(st.excess_20d, 1)}</b> gerisinde kaldı (${num(st.n, 0)} olay, ${esc(st.period)}). Ortalama küçük ve dağınık bir etki; satış sinyali değil, risk notu.</div></div>
+    ${/^https:\/\//.test(top.url || '') ? `<a class="btn" href="${esc(top.url)}" target="_blank" rel="noopener" style="padding:4px 10px;font-size:12px">KAP'ta aç</a>` : ''}</div>`;
+}
 async function loadForecast(sym) {
   const box = $('#fc');
   charts['fc-chart']?.destroy(); delete charts['fc-chart'];
@@ -692,7 +723,15 @@ function renderForecast(box, f) {
           <span class="num small ${dirCls(r20)}" style="width:62px;text-align:right">${pct(r20, 1)}</span></div>`;
       }).join('')}</div></div></div>
       <p class="note" style="margin:10px 0 0">${esc(f.analogs_note || '')}</p></details>` : ''}
+    ${f.ranges?.horizons?.length ? `<div class="fc-range" style="margin-top:20px">
+      <div class="card-head" style="margin-bottom:10px"><h3 style="margin:0;font-size:14px">Olası fiyat aralığı</h3>
+        <span class="hint">Oynaklık tahmini · yön iddiası yok</span></div>
+      ${rangeBlock(f.ranges.horizons, f.ranges.close, '₺', f.ranges.close >= 1000 ? 0 : 2, 'fc-range-draw')}
+      <p class="note" style="margin:10px 0 0">Beklenen yıllık oynaklık <b class="num" style="color:var(--text)">${pct(f.ranges.vol_forecast_ann, 0, false)}</b>${f.ranges.vol_pctile_5y !== undefined
+        ? ` · hissenin son 5 yılına göre ${num(f.ranges.vol_pctile_5y * 100, 0)}. yüzdelik` : ''}. ${esc(f.ranges.note || '')}</p></div>` : ''}
     <p class="note" style="margin:12px 0 0">${esc(f.disclaimer || 'Olasılıksal bir tahmindir; yatırım tavsiyesi değildir.')} · ${fdate(f.as_of)} kapanışına göre</p>`;
+  const rd = box.querySelector('#fc-range-draw');
+  if (rd) rd.onclick = () => drawRange(f.ranges.horizons.find((h) => h.days === 20) || f.ranges.horizons.at(-1), 'TRY');
   const det = box.querySelector('details.analogs');
   if (det && f.analogs?.length) det.addEventListener('toggle', () => { if (det.open && !charts['fc-chart']) drawAnalogs(f); });
 }
@@ -879,6 +918,7 @@ async function pageImpact(v) {
       <div class="card"><div class="card-head"><h2>Yıllara göre</h2><span class="hint">3 günlük ortalama tepki</span></div><div style="height:220px"><canvas id="i-year"></canvas></div>
         <p class="note" style="margin:12px 0 0">Her nokta o yıl Grok'un olumlu (yeşil) ya da olumsuz (kırmızı) bulduğu bildirimlerden sonraki 3 işlem gününde hissenin BIST 100'e göre ortalama getirisi.</p></div>
     </div>
+    <div class="card" style="margin-top:16px"><div class="card-head"><h2>Konuya göre: tepki ve sonrası</h2><span class="hint">Tüm borsa · haftalık güncellenir</span></div><div id="i-topics">${skel(200)}</div></div>
     <div class="card" style="margin-top:16px"><div class="card-head"><h2>Ayrıntılı tablo</h2><span class="hint">En az 15 olay</span></div><div id="i-table"></div></div>`;
   const load = async () => {
     const sym = $('#i-sym').value.trim().toUpperCase();
@@ -919,6 +959,25 @@ async function pageImpact(v) {
   $('#i-go').onclick = load;
   $('#i-sym').onkeydown = (e) => { if (e.key === 'Enter') load(); };
   load();
+  loadTopics();
+}
+const VERDICT_CLS = { 'sonrasında da sürüyor': 'pos', 'sonrasında geri veriyor': 'neg', 'sonrasında düşüş sürüyor': 'neg', 'aynı gün fiyatlanıyor': 'acc' };
+async function loadTopics() {
+  const box = $('#i-topics');
+  let d;
+  try { d = await api('/kap-topics'); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  if (!d.available || !d.rows?.length) { box.innerHTML = '<div class="empty">Konu çalışması henüz üretilmedi (haftalık pipeline görevi: kap_topics).</div>'; return; }
+  const rows = d.rows.filter((r) => r.label === null).sort((a, b) => Math.abs(b.t_drift20) + Math.abs(b.t_reaction) / 2 - Math.abs(a.t_drift20) - Math.abs(a.t_reaction) / 2);
+  const t = (v) => `<span class="muted small">t ${num(v, 1)}</span>`;
+  box.innerHTML = `<table class="tbl"><thead><tr><th>Konu</th><th>n</th><th>Olay günü</th><th>Sonraki 5 gün</th><th>Sonraki 20 gün</th><th>Tutarlılık</th><th>Okuma</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr><td>${esc(r.topic)}</td><td class="num muted">${num(r.n, 0)}</td>
+      <td class="num ${dirCls(r.reaction)}">${pct(r.reaction, 2)} ${t(r.t_reaction)}</td><td class="num ${dirCls(r.drift5)}">${pct(r.drift5, 2)}</td>
+      <td class="num ${dirCls(r.drift20)}">${pct(r.drift20, 2)} ${t(r.t_drift20)}</td>
+      <td class="num muted" title="20 günlük etkinin ortalamayla aynı yönde olduğu yıl sayısı">${r.years_same_sign_20}/${r.years} yıl</td>
+      <td><span class="pill ${VERDICT_CLS[r.verdict] || ''}">${esc(r.verdict)}</span></td></tr>`).join('')}</tbody></table>
+    <p class="note" style="margin:10px 0 0">${esc(d.method || '')} Dönem ${d.period ? `${fdate(d.period[0])} – ${fdate(d.period[1])}` : '–'}.
+      "Sonrasında" sütunları, haberi yayımlandıktan sonra gören birinin hâlâ yakalayabileceği farkı gösterir; |t| 2,5'in altı rastlantıdan ayırt edilemez.
+      İşlem maliyeti dahil değildir; yatırım tavsiyesi değildir.</p>`;
 }
 
 async function pageNewsFeed(v) {

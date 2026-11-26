@@ -169,6 +169,8 @@ def finsent_ingest():
             return {"skipped": "backfill window"}
         path = gf._study_path()
         stale = not path.exists() or (date.today() - date.fromtimestamp(path.stat().st_mtime)).days >= 7
+        if not stale:   # a newly added target (e.g. silver) gets its study right away
+            stale = not set(gf.TARGETS) <= set(json.loads(path.read_text()))
         if stale:   # weekly walk-forward re-evaluation (a few minutes); daily runs only refit + forecast
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(gf.research(), indent=1, default=float))
@@ -188,6 +190,29 @@ def finsent_ingest():
         from finsent.config import get_settings
 
         return jp.push(get_settings())
+
+    @task(retries=1, execution_timeout=timedelta(minutes=30))
+    def paper_follow() -> dict:
+        # paper portfolios linked to a saved strategy: apply today's signals at the fresh closes.
+        # Strategy code runs in the isolated strategy-runner container, not here.
+        from finsent import paper_follow as pf
+
+        return pf.run()
+
+    @task(retries=1, execution_timeout=timedelta(minutes=30), trigger_rule="all_done")
+    def kap_topics() -> dict:
+        # weekly: which KAP topics move prices and whether anything drifts afterwards
+        from finsent import kap_topics as kt
+        from finsent import mysql_sink
+        from finsent.config import get_settings
+
+        settings = get_settings()
+        with mysql_sink.connect(settings) as conn, conn.cursor() as cur:
+            cur.execute("SELECT updated_at FROM research_results WHERE rkey = %s", (kt.RKEY,))
+            row = cur.fetchone()
+        if row and (date.today() - row[0].date()).days < 7:
+            return {"skipped": "fresh", "updated_at": str(row[0])}
+        return kt.run(settings)
 
     @task.short_circuit
     def lakehouse_enabled(**context) -> bool:
@@ -209,6 +234,8 @@ def finsent_ingest():
     loaded >> lakehouse_enabled() >> trigger
     fc = direction_forecast(win)
     loaded >> fc
+    loaded >> paper_follow()
+    fc >> kap_topics()   # after the forecast: both load the full price history (memory)
     win >> collect_intraday()
     gfc = gold_forecast(win)
     win >> refresh_instruments() >> gfc

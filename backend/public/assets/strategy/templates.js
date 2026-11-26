@@ -210,6 +210,73 @@ const strategy = {
   },
 };`);
 
+  add('risk_off_gold', 'Endeks / altın rotasyonu', 'Portföy', 'Riskli varlık (ilk sembol) trendin üstündeyken onda dur, altına inince güvenli varlığa (ikinci sembol, ör. gram altın) geç.', ['XU100', 'ALTIN'], `
+const strategy = {
+  name: 'Endeks / altın rotasyonu',
+  description: 'İlk sembol (riskli varlık) kendi uzun ortalamasının üstündeyse tamamen onda, altındaysa ikinci sembolde (güvenli liman) dur. Sinyal yalnızca hafta sonu kapanışlarında kontrol edilir; gereksiz al-sat azalır.',
+  params: {
+    trend: { label: 'Trend ortalaması (gün)', default: 200, min: 50, max: 300, step: 10 },
+    buffer: { label: 'Bant (%): kararsız bölge', default: 2, min: 0, max: 10, step: 0.5 },
+    weeklyOnly: { label: 'Yalnızca haftanın son günü kontrol et', default: true },
+  },
+  indicators(s, p, ta) {
+    return { avg: ta.sma(s.close, p.trend) };
+  },
+  onBar(ctx, p) {
+    if (ctx.symbols.length < 2) throw new Error('Bu şablon iki sembol ister: riskli varlık ve güvenli varlık (ör. XU100 ve ALTIN).');
+    const [risk, safe] = ctx.symbols;
+    const next = ctx.bar(risk, 0);
+    if (p.weeklyOnly && next) {
+      const d = new Date(ctx.date + 'T00:00:00Z');
+      if (d.getUTCDay() !== 5 && !ctx.isLastBar) return;   // Fridays (and the last bar for today's signal)
+    }
+    const c = ctx.close(risk), avg = ctx.ind(risk, 'avg');
+    if (!ta.isNum(avg)) return;
+    const inRisk = !!ctx.position(risk), inSafe = !!ctx.position(safe);
+    if (c > avg * (1 + p.buffer / 100) && !inRisk) {
+      ctx.sell(safe, { reason: 'trend yukarı: güvenli varlıktan çık' });
+      ctx.targetPercent(risk, 99, { reason: 'fiyat ortalamanın üstünde' });
+    } else if (c < avg * (1 - p.buffer / 100) && !inSafe) {
+      ctx.sell(risk, { reason: 'trend aşağı: riskten çık' });
+      ctx.targetPercent(safe, 99, { reason: 'güvenli limana geç' });
+    } else if (!inRisk && !inSafe) {
+      ctx.targetPercent(c >= avg ? risk : safe, 99, { reason: 'ilk pozisyon' });
+    }
+  },
+};`);
+
+  add('volume_breakout', 'Hacimli kırılım', 'Trend', 'Fiyat N günlük zirveyi, hacim ortalamanın katları üzerindeyken kırarsa al; iz süren stop veya süre dolunca çık.', ['ASELS', 'THYAO', 'KCHOL'], `
+const strategy = {
+  name: 'Hacimli kırılım',
+  description: 'Kapanış önceki N günün en yükseğini aşar ve o günün hacmi 20 günlük ortalamanın belirli katından fazlaysa al. İz süren stop ile koru, en fazla belirli gün tut.',
+  params: {
+    lookback: { label: 'Zirve penceresi (gün)', default: 20, min: 5, max: 120, step: 5 },
+    volMult: { label: 'Hacim çarpanı (x ortalama)', default: 2, min: 1, max: 6, step: 0.25 },
+    trail: { label: 'İz süren stop (%)', default: 10, min: 2, max: 30, step: 1 },
+    maxDays: { label: 'En uzun tutma (gün)', default: 40, min: 5, max: 200, step: 5 },
+  },
+  indicators(s, p, ta) {
+    return {
+      high: ta.ref(ta.highest(s.close, p.lookback), 1),
+      volAvg: ta.ref(ta.sma(s.volume, 20), 1),
+    };
+  },
+  onBar(ctx, p) {
+    const weight = 99 / ctx.symbols.length;
+    for (const sym of ctx.symbols) {
+      const bar = ctx.bar(sym);
+      const hi = ctx.ind(sym, 'high'), va = ctx.ind(sym, 'volAvg');
+      if (!bar || !ta.isNum(hi) || !ta.isNum(va) || va <= 0) continue;
+      const pos = ctx.position(sym);
+      if (!pos && bar.close > hi && bar.volume > va * p.volMult) {
+        ctx.buy(sym, { percent: weight, trailingStop: p.trail / 100, reason: 'hacim ' + (bar.volume / va).toFixed(1) + 'x ile zirve kırılımı' });
+      } else if (pos && pos.barsHeld >= p.maxDays) {
+        ctx.sell(sym, { reason: p.maxDays + ' gün doldu' });
+      }
+    }
+  },
+};`);
+
   add('dca', 'Düzenli birikim (aylık alım)', 'Temel', 'Sermayeyi N aya bölüp her ay aynı tutarda al; ortalama maliyet etkisini gör.', ['ALTIN'], `
 const strategy = {
   name: 'Düzenli birikim',

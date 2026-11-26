@@ -233,7 +233,8 @@ final class PaperController
         $out = ['id' => $id, 'name' => $a['name'], 'initial_cash' => (float) $a['initial_cash'], 'fee_bps' => (float) $a['fee_bps'],
                 'created_at' => $a['created_at'], 'cash' => $st['cash'], 'value' => $value, 'pnl' => $value - (float) $a['initial_cash'],
                 'return' => $value / (float) $a['initial_cash'] - 1, 'realised' => $st['realised'], 'fees' => $st['fees'],
-                'positions' => $positions, 'trade_count' => count($trades), 'strategy_id' => $a['strategy_id'] !== null ? (int) $a['strategy_id'] : null];
+                'positions' => $positions, 'trade_count' => count($trades), 'strategy_id' => $a['strategy_id'] !== null ? (int) $a['strategy_id'] : null,
+                'last_trade_at' => $trades ? end($trades)['traded_at'] : null];
         if ($full) {
             $out['trades'] = array_reverse($trades);
             $out['history'] = self::history($a, $trades);
@@ -336,6 +337,22 @@ final class PaperController
             }
             throw $e;
         }
+    }
+
+    /** Follow a saved strategy (or stop following with strategy_id null). @return array<string,mixed> */
+    public static function link(string $id): array
+    {
+        $a = self::account($id);
+        $b = Http::body();
+        $sid = isset($b['strategy_id']) && $b['strategy_id'] !== null && $b['strategy_id'] !== '' ? (int) $b['strategy_id'] : null;
+        if ($sid !== null) {
+            StrategyController::ensureTable();
+            if (!Db::one('SELECT 1 FROM strategies WHERE id = ?', [$sid])) {
+                throw new HttpError(404, 'strateji bulunamadı');
+            }
+        }
+        Db::exec('UPDATE paper_accounts SET strategy_id = ? WHERE id = ?', [$sid, (int) $a['id']]);
+        return ['id' => (int) $a['id'], 'strategy_id' => $sid];
     }
 
     /** @return array<string,mixed> */

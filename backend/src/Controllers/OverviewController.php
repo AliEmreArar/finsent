@@ -131,6 +131,16 @@ final class OverviewController
         return ['by_label' => $rows, 'by_event_type' => $byType];
     }
 
+    /** KAP topic study (pipeline/finsent/kap_topics.py, refreshed weekly): reaction and 20-day drift per topic. */
+    public static function kapTopics(): array
+    {
+        $row = Db::one('SELECT payload, updated_at FROM research_results WHERE rkey = ?', ['kap_topics']);
+        if (!$row) {
+            return ['available' => false, 'rows' => []];
+        }
+        return ['available' => true, 'updated_at' => $row['updated_at']] + (json_decode((string) $row['payload'], true) ?: []);
+    }
+
     /** Detailed news-impact study: event type x sentiment, per year, optional symbol filter. */
     public static function newsImpact(): array
     {

@@ -27,7 +27,10 @@ OZ = 31.1034768
 HORIZONS = (1, 5, 20)
 TICKERS = {"GOLD": "GC=F", "SILVER": "SI=F", "DXY": "DX-Y.NYB", "US10Y": "^TNX", "VIX": "^VIX",
            "OIL": "CL=F", "SPX": "^GSPC", "COPPER": "HG=F", "USDTRY": "USDTRY=X"}
-TARGETS = {"XAUUSD": {"start": "2001-06-01", "name": "Ons altın"}, "ALTIN": {"start": "2006-06-01", "name": "Gram altın"}}
+TARGETS = {"XAUUSD": {"start": "2001-06-01", "name": "Ons altın", "metal": "GOLD", "tl": False},
+           "ALTIN": {"start": "2006-06-01", "name": "Gram altın", "metal": "GOLD", "tl": True},
+           "XAGUSD": {"start": "2001-06-01", "name": "Ons gümüş", "metal": "SILVER", "tl": False},
+           "GUMUS": {"start": "2006-06-01", "name": "Gram gümüş", "metal": "SILVER", "tl": True}}
 LABELS = {
     "g_ret_5": "altının son 1 haftalık getirisi", "g_ret_20": "altının son 1 aylık getirisi", "g_ret_60": "altının son 3 aylık getirisi",
     "g_ret_250": "altının 1 yıllık getirisi", "g_rsi": "altının RSI'ı", "g_d_sma50": "altının 50 günlük ortalamaya uzaklığı",
@@ -67,7 +70,8 @@ def rsi(s: pd.Series, n: int = 14) -> pd.Series:
 
 def features(raw: pd.DataFrame, target: str) -> tuple[pd.DataFrame, list[str]]:
     df = pd.DataFrame(index=raw.index)
-    px = raw["GOLD"] * raw["USDTRY"] / OZ if target == "ALTIN" else raw["GOLD"]
+    t = TARGETS[target]
+    px = raw[t["metal"]] * raw["USDTRY"] / OZ if t["tl"] else raw[t["metal"]]
     df["px"] = px
     r = px.pct_change()
     for k in (5, 20, 60, 250):
@@ -89,7 +93,7 @@ def features(raw: pd.DataFrame, target: str) -> tuple[pd.DataFrame, list[str]]:
     df["gsr_z"] = (gsr - gsr.rolling(250).mean()) / gsr.rolling(250).std()
     df["gsr_ret_20"] = gsr.pct_change(20)
     feats = [c for c in df.columns if c != "px"]
-    if target == "ALTIN":
+    if t["tl"]:
         for k in (5, 20, 60):
             df[f"fx_ret_{k}"] = raw["USDTRY"].pct_change(k)
         feats += ["fx_ret_5", "fx_ret_20", "fx_ret_60"]
@@ -313,7 +317,7 @@ def run(study: dict | None = None) -> dict:
                              "coverage_68": rv.get("coverage_68"), "coverage_90": rv.get("coverage_90"),
                              "direction_auc": dirv.get("auc"), "direction_years_auc_above_0_5": dirv.get("years_auc_above_0_5")})
         payload = {"version": "gold-v1", "as_of": str(df.index[-1].date()), "close": close, "name": TARGETS[target]["name"],
-                   "currency": "TRY" if target == "ALTIN" else "USD",
+                   "currency": "TRY" if TARGETS[target]["tl"] else "USD", "metal": TARGETS[target]["metal"],
                    "vol": {"forecast_ann": vf, "pctile_5y": float((hist_vf <= vf).mean()), "realized_20d": float(df["g_vol20"].iloc[-1])},
                    "horizons": horizons, "drivers": driver_table(df), "rules": st.get("rules"),
                    "trend": {"d_sma50": float(df["g_d_sma50"].iloc[-1]), "d_sma200": float(df["g_d_sma200"].iloc[-1]),

@@ -665,48 +665,52 @@
       <p class="muted small" style="margin:6px 0 0">Sinyaller bir sonraki seansın açılışında uygulanırdı. Yatırım tavsiyesi değildir.</p>`;
   }
 
+  // Translates backtest signals into paper orders with the same meaning (target weights, partial
+  // sells, fixed amounts) and sends them, sells first. Shared by the lab and the portfolio page.
+  // asOf (the signals' data day) goes into the note as [veri YYYY-MM-DD], so the same day's signals
+  // are never applied twice (e.g. on a weekday holiday the latest bar is still yesterday's)
+  async function applySignalsTo(accountId, signals, symbolCount, label, asOf) {
+    const full = await api(`/paper/${accountId}`);
+    // shared with the server-side runner (assets/strategy/apply.js), so both apply signals identically
+    const orders = window.FinSentApply.signalsToOrders(signals, full, symbolCount);
+    const done = [], failed = [], skipped = signals.length - orders.length;
+    for (const o of orders) {
+      const { reason, ...order } = o;
+      try {
+        const res = await window.paperApi.order(accountId, { ...order, note: `${label}: ${asOf ? `[veri ${asOf}] ` : ''}${reason}`.slice(0, 250) });
+        done.push(`${res.side === 'buy' ? 'AL' : 'SAT'} ${res.shares} ${res.symbol}`);
+      } catch (e) { failed.push(`${o.symbol}: ${e.message}`); }
+    }
+    return { done, failed, skipped, account: full };
+  }
+  window.labApplySignals = applySignalsTo;
+
   async function applySignals(r) {
     if (!window.paperApi) return;
     if (S.config.currency !== 'TRY') { toast('Sanal portföy TL bazlı: para birimini TL yapıp yeniden test et.'); return; }
     const btn = $('#lab-apply'); btn.disabled = true;
     try {
       const acc = await window.paperApi.ensureAccount();
-      const full = await api(`/paper/${acc.id}`);
-      if (!confirm(`${r.signals.length} sinyal "${full.name}" portföyüne uygulansın mı?`)) { btn.disabled = false; return; }
-      const done = [], failed = [];
-      const held = (sym) => full.positions.find((p) => p.symbol === sym);
-      // translate each signal into a paper order with the same meaning as in the backtest
-      const toOrder = (s) => {
-        const h = held(s.sym);
-        if (s.side === 'sell') {
-          if (!h) return null;
-          if (s.shares) return { side: 'sell', shares: s.shares };
-          if (s.percent) return { side: 'sell', shares: Math.floor((h.shares * s.percent) / 100) };
-          return { side: 'sell' };
-        }
-        if (s.side === 'target') {
-          const diff = (full.value * s.targetPercent) / 100 - (h ? h.value : 0);
-          if (Math.abs(diff) < full.value * 0.002) return null;   // already at target
-          return diff > 0 ? { side: 'buy', amount: Math.floor(diff) } : (h ? { side: 'sell', shares: Math.floor(-diff / h.price) } : null);
-        }
-        if (s.shares) return { side: 'buy', shares: s.shares };
-        if (s.amount) return { side: 'buy', amount: Math.floor(s.amount) };
-        return { side: 'buy', amount: Math.floor((full.value * (s.percent ?? 100 / r.symbols.length)) / 100) };
-      };
-      const orders = r.signals.map((s) => ({ s, o: toOrder(s) })).filter((x) => x.o && !(x.o.shares === 0));
-      orders.sort((a, b) => (a.o.side === 'sell' ? 0 : 1) - (b.o.side === 'sell' ? 0 : 1));   // sells fund buys
-      for (const { s, o } of orders) {
-        try {
-          const res = await window.paperApi.order(acc.id, { symbol: s.sym, ...o, note: `${S.name}: ${s.reason}`.slice(0, 250) });
-          done.push(`${res.side === 'buy' ? 'AL' : 'SAT'} ${res.shares} ${res.symbol}`);
-        } catch (e) { failed.push(`${s.sym}: ${e.message}`); }
-      }
-      toast(`${done.length} emir uygulandı${failed.length ? `, ${failed.length} başarısız` : ''}`);
-      if (failed.length) console.warn(failed);
-      if (done.length && confirm('Sanal portföye gidilsin mi?')) location.hash = `#/portfoy/${acc.id}`;
+      if (!confirm(`${r.signals.length} sinyal "${acc.name}" portföyüne uygulansın mı?`)) { btn.disabled = false; return; }
+      const res = await applySignalsTo(acc.id, r.signals, r.symbols.length, S.name, r.dates?.at(-1));
+      toast(`${res.done.length} emir uygulandı${res.failed.length ? `, ${res.failed.length} başarısız` : ''}`);
+      if (res.failed.length) console.warn(res.failed);
+      if (res.done.length && confirm('Sanal portföye gidilsin mi?')) location.hash = `#/portfoy/${acc.id}`;
     } catch (e) { toast(e.message); }
     btn.disabled = false;
   }
+
+  // Runs a saved strategy up to the latest data (its own settings, TL) and returns today's signals.
+  window.labSignalsFor = async function labSignalsFor(strategyId) {
+    const st = await api(`/strategies/${strategyId}`);
+    const c = { ...defaultState().config, ...(st.config || {}), currency: 'TRY', to: today };
+    // a year of trading is enough to reach "today" with warmed-up indicators
+    const from = new Date(); from.setFullYear(from.getFullYear() - 1);
+    c.from = from.toISOString().slice(0, 10);
+    const data = await loadData(c);
+    const r = await run('backtest', { code: st.code, data: data.series, params: c.params || {}, config: engineConfig(data, c), benchmark: null }, { timeoutMs: 45000 });
+    return { name: st.name, asOf: r.dates.at(-1), signals: r.signals, symbols: r.symbols, openPositions: r.openPositions };
+  };
 
   function drawEquity(r, scale) {
     const C = COLORS();

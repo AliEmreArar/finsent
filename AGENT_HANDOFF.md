@@ -1,7 +1,7 @@
 # FinSent: agent devir dosyası (handoff)
 
 > Bu dosya, projeyi devralacak bir yapay zekâ ajanı ya da geliştirici için yazıldı. Projede ne var, neler yapıldı, neler denendi ve tutmadı, açık işler neler ve nelere dokunulmamalı, hepsi burada.
-> Son güncelleme: 2026-11-25 (Strateji Laboratuvarı, bkz. §13).
+> Son güncelleme: 2026-11-26 (hisse fiyat aralıkları §14, gümüş §15, olumsuz KAP rozeti §16, KAP konu çalışması §17, bedelsiz A/B §18).
 > Kavramların açıklamalı eğitim versiyonu [docs/EGITIM.md](docs/EGITIM.md) dosyasındadır.
 
 ---
@@ -63,7 +63,7 @@ docker compose exec airflow finsent seed   # veri: GitHub Release data-* (~730 M
 **Bellek:** Docker Desktop (WSL2) ~8 GB. `mem_limit` değerleri: airflow 5g, mysql 1536m. Hisse tahmin modelinin yeniden eğitimi ~3 GB kullanır. Eskiden VM'i kilitliyordu, çözümü slim float32 frame ve joblib kaydıydı. VM kilitlenirse: `wsl --shutdown` ve Docker Desktop'ı yeniden başlatın.
 
 **Testler:**
-- Python: `pipeline/.venv` içinde `python -m pytest pipeline/tests -q` (33 test).
+- Python: `pipeline/.venv` içinde `python -m pytest pipeline/tests -q` (33 + 6 test).
 - Strateji motoru (JS): `node --test 'backend/tests/js/*.test.js'` (Node 18+, bağımlılık yok).
 - Strateji backend (PHP): `php backend/tests/php/run.php` (`backend/vendor` gerekir: `cd backend && composer install`).
 
@@ -261,12 +261,6 @@ Açık kalanlar:
 
 ### Fikir havuzu (yapılmadı)
 
-- **Olumsuz KAP bildirimi uyarı rozeti:** hisse sayfasında ve ajan bağlamında gösterilir. Olay çalışmasına göre olumsuz haber sonrası 20 günde endeksin ~%0,5 altında kalınıyor.
-
-- Gümüş (XAGUSD/GUMUS) için de aralık modeli.
-- Hisseler için de oynaklık ve aralık bantları (altında kalibre çıktı; hisselerde de büyük ihtimalle işe yarar).
-- KAP bildirim türüne göre olay çalışması (temettü, bedelsiz, ihale vb.) ve bunların tahmine eklenmesi.
-- Ons altın grafiğinde fiyat ekseni 3 ondalık gösteriyor (`4.033,600`); 2 ondalığa düşürülebilir.
 
 ---
 
@@ -380,4 +374,107 @@ Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir 
 - *XSS:* Parametreler worker'da yalnızca sayı ve mantıksal değer olarak dışarı çıkar ve öznitelikler sayıya zorlanır. Kayıtlı listede `trades` biçimlendirilir.
 - *Sanal portföy:* Emirler hesap satırı kilitlenerek (`FOR UPDATE`) işlemde yazılır. Fiyat kaynağı etiketi sütuna sığacak şekilde kısaltıldı.
 
+**Stratejiyi takip et (sanal portföy):**
+- Portföy sayfasında kayıtlı bir strateji portföye bağlanabilir (`POST /api/paper/{id}/link {strategy_id}`, `paper_accounts.strategy_id`).
+- Sayfa her açıldığında strateji kendi ayarlarıyla son 1 yıl + ısınma verisinde tarayıcıda çalıştırılır (`window.labSignalsFor`) ve bugünün sinyalleri listelenir.
+- "Sinyalleri uygula", laboratuvarla ortak `window.labApplySignals` fonksiyonunu kullanır: hedef ağırlık, kısmi satış ve tutar aynı anlamla emre çevrilir.
+- Aynı gün aynı stratejiden işlem varsa "bugün zaten uygulandı" gösterilir ve düğme kapatılır.
+
+**Sunucu tarafında günlük takip (tarayıcı kapalıyken):**
+- Yeni `strategy-runner` servisi (`node:22-alpine`, `strategy-runner/runner.js`): `network_mode: none`, `read_only`, `cap_drop: ALL`, `no-new-privileges`, 512 MB ve 64 süreç sınırı. Veritabanı şifresi yok.
+- Airflow ile tek bağlantısı `strategy-jobs` volume'üdür. Airflow `in/<id>.json` yazar (geçici dosya + rename), runner `out/<id>.json` döndürür.
+- Strateji kodu Node `vm` ile **boş bir bağlamda** çalışır: içeri yalnızca JSON metni girer; `process`, `require`, zamanlayıcı ve dosya sistemi yoktur; zaman aşımı 60 sn. Testlerde constructor üzerinden kaçış denemeleri de doğrulandı.
+- Airflow görevi `paper_follow` (`load_serving_db`'den sonra) `finsent.paper_follow.run()`'ı çağırır. Bağlı her hesap için PHP API'den strateji, veri ve hesabı alır, runner'a iş gönderir, dönen emirleri `/api/paper/{id}/order` ile verir (önce satışlar). Aynı gün aynı stratejiden işlem varsa atlar. Elle çalıştırma: `finsent paper-follow`.
+- Sinyal→emir çevirisi `assets/strategy/apply.js` ile laboratuvar, portföy sayfası ve runner'da ortaktır.
+- Yerelde gerçek runner + PHP + MariaDB ile entegrasyon testi yapıldı (hedef %40 → %39,8; ikinci çalıştırma atlandı). Docker daemon olmadığı için compose servisi bu oturumda ayağa kaldırılamadı. **İlk kurulumda `docker compose build airflow && docker compose up -d` gerekir** (yeni modül imaja girer, runner servisi başlar).
+- Testler: `backend/tests/js/runner.test.js`, `pipeline/tests/test_paper_follow.py`.
+
 **Açık fikirler:** gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).
+
+---
+
+## 14. Hisse fiyat aralıkları (2026-11-26, `stock_range.py`, payload `ranges` / `range-v1`)
+
+Yön yazı-turaya yakın, ama oynaklık kalıcı olduğu için tahmin edilebilir. Altın aralık modeli tüm hisse kesitine genişletildi.
+
+- **Model:** tek, havuzlanmış log-lineer regresyon: sonraki 20 günün gerçekleşen oynaklığı ~ hissenin 5/20/60 günlük oynaklığı + BIST 100'ün 20 günlük oynaklığı. Standart getiri `z = fwd_h / (vf·√(h/252))` için son 10 yılın ampirik kantilleri, tahmin oynaklığının üç dilimine (sakin / orta / oynak) göre ayrı.
+- **Sermaye işlemi:** |günlük hareket| > %25 olan günler oynaklık hesabına girmez; çevresindeki pencereler (`clean`) fit'ten çıkarılır.
+- **İleri yürüyen test (2012–2026, yalnızca önceki veriyle fit), 1,5 M gözlem:**
+
+| Ufuk | %90 bant kapsaması | %68 bant kapsaması | Ort. %90 genişlik | Naif (20g oynaklık + normal) %90 kapsama |
+|---|---|---|---|---|
+| 1 gün | %89,0 | %65,8 | %9,5 | %87,6 |
+| 5 gün | %89,0 | %65,1 | %22,0 | %85,9 |
+| 20 gün | %88,7 | %65,2 | %48,0 | %82,8 |
+
+  Oynaklık dilimine göre %90 kapsama: sakin %90,2, orta %88,7, oynak %87,7 (20 gün). Zayıf yıllar: 2020 (COVID) %77, 2026 %82; rejim kırılmalarında bant dar kalıyor.
+- **Üretim:** `forecast.run()` aralıkları her gün hesaplar (628 hisse ~2,5 sn) ve her hissenin v2 payload'una `ranges` olarak ekler. Kapsama çalışması model yeniden eğitildiğinde (haftalık) ya da dosya yoksa yenilenir: `data/models/stock_range_study.json`. Hata olursa yalnızca bantlar düşer, yön tahmini yazılır.
+- **UI:** hisse sayfasındaki tahmin kartında "Olası fiyat aralığı" (altın kartıyla ortak `rangeBlock` / `drawRange`), "1 aylık aralığı grafikte göster" düğmesi.
+- **Ajan:** `get_forecast` hisseler için `price_ranges` döndürür; "fiyat nereye gidebilir" sorularında yön yerine aralık kullanması istenir.
+- **Testler:** `pipeline/tests/test_stock_range.py` (kalibrasyon, sermaye işlemi, geleceği görmeme, önbellek).
+
+## 15. Gümüş aralık modeli (2026-11-26)
+
+- `gold_forecast.TARGETS` artık `XAUUSD`, `ALTIN`, `XAGUSD` (ons gümüş), `GUMUS` (gram gümüş = SI=F × USD/TRY ÷ 31,1035). Her hedefte `metal` ve `tl` alanı var. Özellikler hedef metalin kendi fiyatından hesaplanır; makro girdiler aynıdır. Payload'da `metal: "GOLD"|"SILVER"`.
+- **İleri yürüyen sonuç (2012–2026):** yön AUC 0,48–0,53, yani gümüşte de yön tahmin edilemiyor. %90 bant kapsaması: XAGUSD %89,4 / %89,9 / %90,5, GUMUS %89,1 / %88,9 / %88,7 (1/5/20 gün). Ortalama 1 aylık %90 bant genişliği ~%28 (altında ~%15-18).
+- **Kurallar:** ons gümüşte "12 ay momentum > 0" (yıllık %5,1, düşüş −%57) ve "DXY < 200g" (%3,8) al-tut'u (%2,3, düşüş −%68) geçti. Gram gümüşte hiçbiri geçmedi. Arayüz bu cümleyi artık veriden üretiyor ve "olası şans" uyarısı ekliyor.
+- DAG: `gold_study.json`'da bir hedef eksikse çalışma haftayı beklemeden yeniden yapılır.
+- UI: `GOLD_FC` gümüşleri de içerir; metin metal adına göre değişir ("gümüşe destek / baskı"). Fiyat ekseni: USD fiyatı ≥ 100 ise 2 ondalık (`priceDec`), küçük USD fiyatlarında 3.
+
+## 16. Olumsuz KAP bildirimi rozeti (2026-11-26)
+
+- **Olay çalışması** (`scripts/negative_news_study.py <release klasörü>`): BIST 100'e göre anormal getiri, aynı aydaki nötr bildirimlere göre arındırılmış, t değeri aylara göre kümelenmiş.
+
+| Grup | n | 5 gün | 20 gün | t (ay) | Negatif yıl |
+|---|---|---|---|---|---|
+| Güçlü olumsuz (skor ≤ −0,7) | 565 | −%0,9 | **−%1,6** | −2,3 | 5/6 |
+| Diğer olumsuz | 8.436 | %0,0 | −%0,4 | −1,1 | 4/6 |
+| Olumlu | 36.712 | +%0,1 | +%0,1 | 0,0 | – |
+
+  Önceki "olumsuzlarda −%0,5" bulgusunun büyük kısmı güçlü olumsuzlardan geliyor. Ani tepki (olay günü) neredeyse sıfır; etki yavaş yayılıyor. Hafif olumsuzlar rozet göstermez.
+- `Services/NewsAlert.php`: son 20 işlem gününde skor ≤ −0,7 olan (lexicon dışı) bildirimler. Çalışma rakamları `NewsAlert::STUDY` sabitinde; veri yenilenince betik tekrar çalıştırılıp sabit güncellenmeli.
+- API: `GET /api/news-alert/{symbol}` → `{active, items[], study}`.
+- UI: hisse sayfası başlığının altında kırmızı kenarlı uyarı kutusu (konu, kaç işlem günü önce, Grok'un ana noktaları, etki büyüklüğü, "satış sinyali değil" notu, KAP linki yalnızca `https://` ise).
+- Ajan: `get_disclosures` çıktısında `negative_news_alert` alanı (kanıt ve "risk notu, satış sinyali değil" talimatıyla).
+- Veritabanı boşken uç doğrulandı (`active:false`). Veri yüklendikten sonra gerçek bir hissede gözle kontrol edilmeli.
+
+## 17. KAP konu bazında olay çalışması (2026-11-26, `kap_topics.py`)
+
+- **Konular:** KAP konu satırından ("Yeni İş İlişkisi", "İhale Süreci / Sonucu", "Payların Geri Alınması"…). Sermaye artırımı metinden bedelsiz / bedelli diye ayrılır (Türkçe `İ` için `tr_lower`: Python `"BEDELSİZ".lower()` eşleşmiyordu). Genel "Özel Durum Açıklaması" Grok'un `event_type`'ıyla ayrılır.
+- **Ölçüler:** olay günü tepkisi ve olay günü kapanışından sonraki 5/20 işlem günündeki kayma (haberi gördükten sonra hâlâ yakalanabilecek fark). BIST 100'e göre anormal getiri, ayın **tüm hisse-günlerindeki** ortalama anormal getiri × pencere uzunluğuyla arındırılır. Bildirim günlerinin ortalamasıyla arındırmak büyük etkileri diğer konulara bulaştırıyordu (testte görüldü). t değeri aylık ortalamalarla hesaplanır. Sözlü yorum (`verdict`): |t| ≥ 3 tepki → "aynı gün fiyatlanıyor"; |t| ≥ 2,5 kayma ve en fazla bir yıl ters yön → "sonrasında…".
+- **Sonuçlar (2021–2026):**
+
+| Konu | n | Olay günü | 20 gün sonra | Yorum |
+|---|---|---|---|---|
+| Bedelsiz sermaye artırımı | 1.872 | +%1,0 (t 7,5) | **−%2,4** (t −3,0, 6/6 yıl) | sonrasında geri veriyor |
+| Yeni iş ilişkisi | 2.999 | +%1,2 (t 13) | +%0,7 (t 1,0) | aynı gün fiyatlanıyor |
+| Olağan dışı fiyat hareketi | 1.315 | +%1,9 | +%0,8 | aynı gün |
+| İhale | 1.203 | +%0,8 (t 6) | +%1,2 (t 1,2) | aynı gün |
+| Bedelli sermaye artırımı | 846 | −%1,2 (t −5) | −%1,5 (t −0,7) | aynı gün |
+| Pay geri alımı | 9.947 | +%0,3 (t 4,4) | +%1,6 (t 2,2, 4/6 yıl) | aynı gün; kayma sınırda |
+| Temettü, genel kurul, dava, kredi notu, içeriden alım-satım | – | ~0 | anlamlı değil | belirgin etki yok |
+
+  Sonuç: haberlerin çoğu aynı gün fiyatlanıyor. Kalıcı ve tutarlı tek kayma bedelsiz sonrası geri verme. Maliyetler dahil değil.
+- **Üretim:** `finsent kap-topics` → `research_results['kap_topics']`. DAG görevi `kap_topics`, `direction_forecast`'tan sonra çalışır (ikisi de tüm fiyat geçmişini yüklüyor; bellek), `trigger_rule=all_done`, haftada bir (sonuç 7 günden yeniyse atlar). Betik: `scripts/kap_event_type_study.py <release klasörü>`.
+- **API/UI:** `GET /api/kap-topics`. Bildirimler → Etki sekmesinde "Konuya göre: tepki ve sonrası" tablosu (t değerleri, yıl tutarlılığı, yorum etiketi).
+- **Ajan:** `news_impact_study` çıktısında `topic_study`.
+- **Testler:** `pipeline/tests/test_kap_topics.py` (sentetik aynı gün tepkisi ve kayma ayrımı, bedelsiz/bedelli ayrımı, sağlayıcı önceliği).
+
+## 18. Bedelsiz sinyali tahmin modeline eklendi mi? Hayır (2026-11-26)
+
+- `scripts/forecast_bonus_lab.py <release klasörü> <çalışma klasörü>`: `bonus_since` (bedelsiz bildiriminden bu yana işlem günü, en fazla 60) ve `bonus_20` özellikleri. Endeksi geçme hedefi, 2023 / 2024 / 2025–26 katmanları, 2021'den eğitim (haber laboratuvarıyla aynı düzen).
+- **Sonuç:** BONUS ve BASE metrikleri 1/5/20 gün için **birebir aynı** (20 gün AUC .5231, IC .091). Model özellikleri hiç kullanmadı: `min_samples_leaf=3000` iken eğitimdeki bedelsiz penceresi satırları (her 3 satırdan 1'i) birkaç bin, bölünme oluşmuyor.
+- **Pencere kontrolü (20 gün, endeksi geçme oranı, test katmanlarında):** 2023 pencere %42,9 / diğer %45,3; 2024 %40,3 / %45,4; 2025–26 **%45,7 / %40,8** (ters). Model penceredeki ve dışındaki satırlara neredeyse aynı olasılığı veriyor.
+- **Karar:** eklenmedi. Olay ortalamasındaki −%2,4 gerçek, ama satır düzeyinde 2025–26'da yön değiştirdi ve model kapasitesiyle yakalanamıyor. Kullanıcıya yalnızca bilgi olarak gösteriliyor (Etki sekmesi, ajan). Yaprak sınırını düşürmek aşırı uyum riskiyle bütün modeli değiştirir; denenmedi.
+- Not: `data/` klasörü Linux sunucuda uid 50000'e ait; ajan oraya yazamıyor. Laboratuvar dosyaları scratchpad'de üretildi.
+
+## 19. Kod incelemesi düzeltmeleri (2026-11-26)
+
+Bağımsız inceleme (`/code-review`) bulguları ve yapılanlar:
+- **Tatilde çift emir (sanal portföy takibi):** `already_applied` yalnızca "bugün işlem var mı"ya bakıyordu. Hafta içi bir tatilde son bar hâlâ dünkü olduğu için aynı emirler tekrar veriliyordu. Emir notlarına artık sinyalin veri günü yazılıyor: `"<strateji>: [veri YYYY-AA-GG] <neden>"`. Bu not laboratuvar, portföy sayfası ve günlük takip görevinde ortak. Aynı veri gününün sinyalleri ikinci kez uygulanmıyor. Portföy sayfasındaki "uygulandı" kontrolü de UTC tarihi yerine bu işarete bakıyor.
+- **Portföy sayfası:** sinyal yokken `#pp-apply` null olduğu için hata kutusu çıkıyordu; giderildi.
+- **Günlük takip:** JSON olmayan hata sayfası (502 / PHP fatal) kalan emirleri durdurup verilenleri özetten düşürüyordu. Artık hata kaydediliyor ve döngü devam ediyor.
+- **Olumsuz KAP rozeti:** istek sürerken başka hisseye geçilirse rozet yanlış sayfaya yazılabiliyordu. Artık yazmadan önce adres kontrol ediliyor. Ayrıca iki LLM sağlayıcısının skorladığı bildirim iki kez sayılıyordu; artık tekilleştiriliyor.
+- **Kural tabanlı çevirici:** "endekste düşüşte gümüşe geç" gümüşü riskli bacak yapıyordu. Güvenli limanlar (ALTIN, XAUUSD, GUMUS, XAGUSD, USDTRY) artık hiçbir zaman riskli bacak olmuyor; kullanıcının söylediği liman güvenli bacak oluyor.
+- **Gümüş kartı:** altına göre tanımlı "destek / baskı" etiketleri gümüşte gizlendi.
+- Testler: `test_paper_follow.py` (tatil, HTML hata sayfası), JS çevirici testi.

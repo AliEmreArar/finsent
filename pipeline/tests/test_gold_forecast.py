@@ -26,3 +26,14 @@ def test_trend_rules_report_buy_and_hold_and_rules():
     rules = gf.trend_rules(df, since="2006-01-01")
     assert rules["Al-tut"]["time_in_market"] == 1.0
     assert all(-1 <= r["maxdd"] <= 0 for r in rules.values())
+
+
+def test_silver_targets_use_silver_prices():
+    raw = _raw()
+    usd, tl = gf.features(raw, "XAGUSD")[0], gf.features(raw, "GUMUS")[0]
+    day = usd.index[-1]
+    assert usd.loc[day, "px"] == raw.loc[day, "SILVER"]
+    assert abs(tl.loc[day, "px"] - raw.loc[day, "SILVER"] * raw.loc[day, "USDTRY"] / gf.OZ) < 1e-9
+    assert "fx_ret_20" in gf.features(raw, "GUMUS")[1] and "fx_ret_20" not in gf.features(raw, "XAGUSD")[1]
+    res = gf.range_walk_forward(tl, first_test_year=2008)
+    assert 0.83 <= res[20]["coverage_90"] <= 0.96

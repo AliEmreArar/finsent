@@ -307,8 +307,15 @@ final class AgentTools
         foreach ($rows as &$r) {
             $r['key_points'] = $r['key_points'] ? json_decode((string) $r['key_points'], true) : [];
         }
+        $alert = NewsAlert::forSymbol($symbol);
         return ['symbol' => $symbol, 'count' => count($rows), 'disclosures' => $rows,
-                'note' => 'car_*_pct = return vs BIST 100 over 1/3 trading days after the disclosure'];
+                'note' => 'car_*_pct = return vs BIST 100 over 1/3 trading days after the disclosure',
+                'negative_news_alert' => $alert['active'] ? [
+                    'disclosures' => array_map(fn($r) => ['day' => $r['event_date'], 'subject' => $r['subject'], 'score' => $r['score'],
+                        'event_type' => $r['event_type'], 'trading_days_ago' => $r['trading_days_ago']], $alert['items']),
+                    'evidence' => 'Strongly negative disclosures (score <= -0.7) were followed by about -1.6% vs BIST 100 over 20 trading days '
+                        . '(n=565, 2021-2026, month-clustered t=-2.3). Weak, average effect: mention it as a risk, not a sell signal.',
+                ] : null];
     }
 
     private static function newsImpact(?string $symbol, ?string $eventType): array
@@ -327,8 +334,16 @@ final class AgentTools
                             WHERE $w GROUP BY s.event_type, s.label HAVING n >= 10 ORDER BY n DESC LIMIT 25", $p);
         $span = Db::one("SELECT MIN(d.published_at) AS f, MAX(d.published_at) AS t FROM event_returns e JOIN disclosures d USING (disclosure_id)
                           JOIN v_sentiment s USING (disclosure_id) WHERE $w", $p);
+        $topics = Db::one('SELECT payload FROM research_results WHERE rkey = ?', ['kap_topics']);
+        $topicRows = $topics ? array_values(array_filter(json_decode((string) $topics['payload'], true)['rows'] ?? [], fn($r) => $r['label'] === null)) : [];
+        $extra = $topicRows ? ['topic_study' => [
+            'note' => 'By KAP subject (bonus/rights issue, buyback, new business, tender...). reaction = event day vs BIST 100; '
+                . 'drift_20d = from the event-day close to +20 days (what was still available after the news). Month-demeaned, t on monthly means.',
+            'topics' => array_map(fn($r) => ['topic' => $r['topic'], 'n' => $r['n'], 'reaction_pct' => self::r($r['reaction'] * 100),
+                'drift_20d_pct' => self::r($r['drift20'] * 100), 't_drift_20d' => self::r($r['t_drift20'], 1), 'verdict' => $r['verdict']], $topicRows),
+        ]] : [];
         return ['scope' => ['symbol' => $symbol, 'event_type' => $eventType, 'from' => $span['f'] ?? null, 'to' => $span['t'] ?? null],
-                'by_label' => $byLabel, 'by_event_type' => $byType];
+                'by_label' => $byLabel, 'by_event_type' => $byType] + $extra;
     }
 
     private static function forecast(string $symbol): array
@@ -347,7 +362,16 @@ final class AgentTools
             'days' => $h['days'], 'p_up' => self::r($h['p_up'], 3), 'p_beat_index' => self::r($h['p_beat'] ?? null, 3),
             'rank_among_all_stocks_pct' => isset($h['rank_pct']) ? self::r($h['rank_pct'] * 100, 0) : null,
             'model_auc_abs' => self::r($h['model_auc'] ?? null, 3), 'model_auc_beat' => self::r($h['beat_auc'] ?? null, 3),
-        ], $f['horizons']), 'reliability_note' => 'AUC 0.5 = coin flip; absolute direction ~0.53-0.54, ranking vs index ~0.55. Treat as weak evidence.'];
+        ], $f['horizons']), 'reliability_note' => 'AUC 0.5 = coin flip; absolute direction ~0.53-0.54, ranking vs index ~0.55. Treat as weak evidence.']
+            + (isset($f['ranges']['horizons']) ? ['price_ranges' => [
+                'vol_forecast_annual_pct' => self::r($f['ranges']['vol_forecast_ann'] * 100, 1),
+                'vol_pctile_5y' => isset($f['ranges']['vol_pctile_5y']) ? self::r($f['ranges']['vol_pctile_5y'] * 100, 0) : null,
+                'horizons' => array_map(fn($h) => ['days' => $h['days'], 'p05' => self::r($h['p05']), 'p16' => self::r($h['p16']),
+                    'p50' => self::r($h['p50']), 'p84' => self::r($h['p84']), 'p95' => self::r($h['p95']),
+                    'walk_forward_coverage_90' => self::r($h['coverage_90'] ?? null, 3)], $f['ranges']['horizons']),
+                'note' => 'Volatility bands in TRY, calibrated (90% band covered ~89% of outcomes, 2012-2026 walk-forward). '
+                    . 'They are a range, not a direction call; prefer them over p_up when the user asks where the price may go.',
+            ]] : []);
     }
 
     private static function social(string $symbol): array
