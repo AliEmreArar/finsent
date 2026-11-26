@@ -667,7 +667,9 @@
 
   // Translates backtest signals into paper orders with the same meaning (target weights, partial
   // sells, fixed amounts) and sends them, sells first. Shared by the lab and the portfolio page.
-  async function applySignalsTo(accountId, signals, symbolCount, label) {
+  // asOf (the signals' data day) goes into the note as [veri YYYY-MM-DD], so the same day's signals
+  // are never applied twice (e.g. on a weekday holiday the latest bar is still yesterday's)
+  async function applySignalsTo(accountId, signals, symbolCount, label, asOf) {
     const full = await api(`/paper/${accountId}`);
     // shared with the server-side runner (assets/strategy/apply.js), so both apply signals identically
     const orders = window.FinSentApply.signalsToOrders(signals, full, symbolCount);
@@ -675,7 +677,7 @@
     for (const o of orders) {
       const { reason, ...order } = o;
       try {
-        const res = await window.paperApi.order(accountId, { ...order, note: `${label}: ${reason}`.slice(0, 250) });
+        const res = await window.paperApi.order(accountId, { ...order, note: `${label}: ${asOf ? `[veri ${asOf}] ` : ''}${reason}`.slice(0, 250) });
         done.push(`${res.side === 'buy' ? 'AL' : 'SAT'} ${res.shares} ${res.symbol}`);
       } catch (e) { failed.push(`${o.symbol}: ${e.message}`); }
     }
@@ -690,7 +692,7 @@
     try {
       const acc = await window.paperApi.ensureAccount();
       if (!confirm(`${r.signals.length} sinyal "${acc.name}" portföyüne uygulansın mı?`)) { btn.disabled = false; return; }
-      const res = await applySignalsTo(acc.id, r.signals, r.symbols.length, S.name);
+      const res = await applySignalsTo(acc.id, r.signals, r.symbols.length, S.name, r.dates?.at(-1));
       toast(`${res.done.length} emir uygulandı${res.failed.length ? `, ${res.failed.length} başarısız` : ''}`);
       if (res.failed.length) console.warn(res.failed);
       if (res.done.length && confirm('Sanal portföye gidilsin mi?')) location.hash = `#/portfoy/${acc.id}`;

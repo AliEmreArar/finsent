@@ -326,6 +326,26 @@ def forecast_symbol(sym_feat: pd.DataFrame, probs: pd.Series, metrics: dict) -> 
     return payload
 
 
+def stock_ranges(raw: pd.DataFrame, settings: Settings, refresh_study: bool = True) -> dict:
+    """Volatility bands per symbol (``stock_range``). The walk-forward coverage study is redone when
+    the direction model retrains (weekly) or is missing. Failures only drop the bands."""
+    from . import stock_range
+
+    study_file = model_path(settings).parent / "stock_range_study.json"
+    try:
+        d = stock_range.stock_rows(raw)
+        study = json.loads(study_file.read_text()) if study_file.exists() else None
+        if refresh_study or study is None:
+            study = stock_range.walk_forward(d)
+            study_file.parent.mkdir(parents=True, exist_ok=True)
+            study_file.write_text(json.dumps(study, indent=1))
+            log.info("stock range study: %s", {h: round(r["coverage_90"], 3) for h, r in study.items()})
+        return stock_range.compute(d, study)
+    except Exception as e:  # noqa: BLE001 - bands are optional; never block the direction forecast
+        log.warning("stock ranges failed: %s", e)
+        return {}
+
+
 def model_path(settings: Settings):
     from pathlib import Path
 
@@ -343,14 +363,15 @@ def run(settings: Settings, as_of: date | None = None, symbols: list[str] | None
 
     end = as_of or date.today()
     raw = market.extract_market(settings, date(2004, 1, 1), end)
-    raw = raw.drop(columns=[c for c in ("bb_mid", "macd", "macd_signal", "pct_change", "source") if c in raw])
-    feat = build_features(raw)
-    del raw
     path = model_path(settings)
     if retrain_after_days is not None and path.exists():
         import time
         age_days = (time.time() - path.stat().st_mtime) / 86400
         predict_only = age_days < retrain_after_days
+    ranges = stock_ranges(raw, settings, refresh_study=not (predict_only and path.exists()))
+    raw = raw.drop(columns=[c for c in ("bb_mid", "macd", "macd_signal", "pct_change", "source") if c in raw])
+    feat = build_features(raw)
+    del raw
     if predict_only and path.exists():
         trained = joblib.load(path)
         log.info("loaded models from %s (trained %s)", path, trained.get("as_of"))
@@ -373,13 +394,17 @@ def run(settings: Settings, as_of: date | None = None, symbols: list[str] | None
     rows = []
     for sym, g in feat[feat["symbol"].isin(wanted & set(probs.index))].groupby("symbol"):
         try:
-            rows.append((sym, forecast_symbol(g, probs.loc[sym], trained["metrics"])))
+            p = forecast_symbol(g, probs.loc[sym], trained["metrics"])
+            if sym in ranges:
+                p["ranges"] = ranges[sym]
+            rows.append((sym, p))
         except Exception as e:  # noqa: BLE001 - one bad symbol must not stop the batch
             log.warning("forecast %s failed: %s", sym, e)
     with mysql_sink.connect(settings) as conn, conn.cursor() as cur:
         cur.executemany("REPLACE INTO forecasts (symbol, as_of, payload) VALUES (%s, %s, %s)",
                         [(s, p["as_of"], json.dumps(p, ensure_ascii=False, default=float)) for s, p in rows])
     summary = {"version": VERSION, "symbols": len(rows), "as_of": str(last_day.date()),
+               "ranges": sum("ranges" in p for _, p in rows),
                "holdout": {t: {str(h): {k: round(v, 4) for k, v in m.items() if isinstance(v, float)}
                                for h, m in by.items()} for t, by in trained["metrics"].items()}}
     log.info("forecast run: %s", summary)

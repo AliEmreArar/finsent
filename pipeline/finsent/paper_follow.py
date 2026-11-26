@@ -54,11 +54,19 @@ def engine_config(cfg: dict, data_from: str) -> dict:
     }
 
 
-def already_applied(account: dict, strategy_name: str, today: date) -> bool:
+def already_applied(account: dict, strategy_name: str, today: date, as_of: str | None = None) -> bool:
+    """True if this strategy already traded today, or (with ``as_of``) already applied the signals of
+    that data day. Notes carry ``[veri YYYY-MM-DD]`` (lab, portfolio page and this runner), so on a
+    weekday holiday, when the latest bar is still yesterday's, the same orders are not placed again."""
     prefix = f"{strategy_name}:"
     day = today.isoformat()
-    return any((t.get("note") or "").startswith(prefix) and str(t.get("traded_at", ""))[:10] == day
-               for t in account.get("trades") or [])
+    for t in account.get("trades") or []:
+        note = t.get("note") or ""
+        if not note.startswith(prefix):
+            continue
+        if str(t.get("traded_at", ""))[:10] == day or (as_of and f"[veri {as_of}]" in note):
+            return True
+    return False
 
 
 def run_job(job: dict, directory: Path, timeout_s: float = 120.0, poll_s: float = 0.5) -> dict:
@@ -112,12 +120,26 @@ def follow_account(http: requests.Session, base: str, account_id: int, directory
     out = run_job(job, directory)
     if not out.get("ok"):
         return {"account": account_id, "strategy": name, "status": "strategy_error", "error": out.get("error")}
+    as_of = out.get("asOf")
+    if already_applied(account, name, today, as_of):
+        return {"account": account_id, "strategy": name, "status": "already_applied", "as_of": as_of}
     placed, failed = [], []
     for o in out.get("orders") or []:
         body = {k: v for k, v in o.items() if k in ("symbol", "side", "shares", "amount")}
-        body["note"] = f"{name}: {o.get('reason') or 'otomatik'}"[:250]
-        r = http.post(f"{base}/api/paper/{account_id}/order", json=body, timeout=60)
-        (placed if r.ok else failed).append({**body, **({"error": r.json().get("error")} if not r.ok else {})})
+        body["note"] = f"{name}: {f'[veri {as_of}] ' if as_of else ''}{o.get('reason') or 'otomatik'}"[:250]
+        try:
+            r = http.post(f"{base}/api/paper/{account_id}/order", json=body, timeout=60)
+        except requests.RequestException as e:  # keep going: the summary must show what was placed
+            failed.append({**body, "error": str(e)[:200]})
+            continue
+        if r.ok:
+            placed.append(body)
+        else:
+            try:
+                err = r.json().get("error")
+            except ValueError:  # HTML error page (proxy / PHP fatal)
+                err = f"HTTP {r.status_code}: {r.text[:200]}"
+            failed.append({**body, "error": err})
     return {"account": account_id, "strategy": name, "status": "applied", "as_of": out.get("asOf"),
             "signals": len(out.get("signals") or []), "placed": placed, "failed": failed}
 

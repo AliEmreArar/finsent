@@ -511,6 +511,14 @@ test('offline parser: gold rotation and volume breakout', () => {
   assert.equal(p.lookback, 30); assert.equal(p.volMult, 3);
 });
 
+test('offline parser: silver as the safe asset stays the safe leg', () => {
+  const known = ['THYAO', 'ALTIN', 'XU100', 'GUMUS', 'USDTRY'];
+  const r = NLP.parse('endeks trendin altına inince gümüşe geç', { knownSymbols: known });
+  assert.deepEqual(r.symbols, ['XU100', 'GUMUS']);
+  const d = NLP.parse('endeks 200 günlük ortalamanın altına inince dolara geç', { knownSymbols: known });
+  assert.deepEqual(d.symbols, ['XU100', 'USDTRY']);
+});
+
 test('gold rotation switches between the two assets and needs two symbols', () => {
   const up = randomWalk(600, 31, 0.002, 0.01), down = randomWalk(600, 32, -0.002, 0.01);
   const risk = makeSeries(up.concat(down.map((x) => (x * up.at(-1)) / 100)).slice(0, 1000));

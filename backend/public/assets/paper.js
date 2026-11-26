@@ -67,17 +67,18 @@
     if (!window.labSignalsFor) { $('#pp-sig').innerHTML = '<div class="muted small">Strateji motoru yüklenemedi.</div>'; return; }
     try {
       const r = await window.labSignalsFor(linked.id);
-      const already = a.last_trade_at && a.last_trade_at.slice(0, 10) >= new Date().toISOString().slice(0, 10)
-        && a.trades.some((t) => (t.note || '').startsWith(`${r.name}:`) && t.traded_at.slice(0, 10) === a.last_trade_at.slice(0, 10));
+      // applied already = a trade of this strategy carries these signals' data day (set by the lab and the daily runner)
+      const already = a.trades.some((t) => (t.note || '').startsWith(`${r.name}:`) && (t.note || '').includes(`[veri ${r.asOf}]`));
       const tag = (s) => (s.side === 'buy' ? ['AL', 'pos'] : s.side === 'sell' ? ['SAT', 'neg'] : ['HEDEF', 'acc']);
-      $('#pp-sig').innerHTML = `<div class="muted small" style="margin-bottom:8px">${esc(r.name)} · son veri ${fdate(r.asOf)}${already ? ' · <span class="up">bugün zaten uygulandı</span>' : ''}</div>
+      $('#pp-sig').innerHTML = `<div class="muted small" style="margin-bottom:8px">${esc(r.name)} · son veri ${fdate(r.asOf)}${already ? ' · <span class="up">bu günün sinyalleri zaten uygulandı</span>' : ''}</div>
         ${r.signals.length ? `<div class="rows">${r.signals.map((s) => `<div class="row" style="cursor:default"><span class="pill ${tag(s)[1]}">${tag(s)[0]}</span><b>${esc(s.sym)}</b>
           <span class="muted small" style="flex:1">${esc(s.reason)}</span>${Number.isFinite(s.targetPercent) ? `<span class="num small">ağırlık %${num(s.targetPercent, 0)}</span>` : Number.isFinite(s.percent) ? `<span class="num small">%${num(s.percent, 0)}</span>` : ''}</div>`).join('')}</div>
           <div class="toolbar" style="margin:10px 0 0"><button class="btn sm primary" id="pp-apply" ${already ? 'disabled' : ''}>Sinyalleri uygula</button></div>`
           : '<div class="muted small">Bugün için yeni sinyal yok: strateji mevcut pozisyonları korur.</div>'}`;
-      $('#pp-apply').onclick = async () => {
-        $('#pp-apply').disabled = true;
-        const res = await window.labApplySignals(a.id, r.signals, r.symbols.length, r.name);
+      const btn = $('#pp-apply');
+      if (btn) btn.onclick = async () => {
+        btn.disabled = true;
+        const res = await window.labApplySignals(a.id, r.signals, r.symbols.length, r.name, r.asOf);
         toast(`${res.done.length} emir uygulandı${res.failed.length ? `, ${res.failed.length} başarısız` : ''}`);
         render(a.id);
       };

@@ -473,3 +473,8 @@ input[type=date].field { color-scheme: dark; }
 .pp-form .seg { align-self: flex-start; }
 .pp-form .field { width: 100%; }
 @media (max-width: 1100px) { .lab-kpis[style] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+
+.news-alert { display: flex; gap: 14px; align-items: flex-start; margin: 0 0 16px; padding: 12px 14px; border: 1px solid rgba(194,65,59,.35);
+  border-left: 3px solid var(--down); border-radius: 10px; background: var(--down-soft); }
+.news-alert .t { font-weight: 500; margin-bottom: 2px; }
+@media (max-width: 700px) { .news-alert { flex-wrap: wrap; } }

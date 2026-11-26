@@ -27,3 +27,6 @@ airflow/logs/
 data/snapshot/
 data/snapshot_release/
 backend/composer.lock
+
+# local API key file
+grok

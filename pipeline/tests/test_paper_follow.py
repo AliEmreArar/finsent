@@ -105,7 +105,7 @@ def test_follow_account_places_runner_orders(tmp_path, monkeypatch):
     assert out["status"] == "applied"
     assert http.data_params["warmup_days"] == 1800 and http.data_params["currency"] == "TRY"
     assert [p[1]["symbol"] for p in http.posted] == ["THYAO", "BAD"]
-    assert http.posted[0][1] == {"symbol": "THYAO", "side": "buy", "amount": 30000, "note": "Takip: hedef"}
+    assert http.posted[0][1] == {"symbol": "THYAO", "side": "buy", "amount": 30000, "note": "Takip: [veri 2026-11-06] hedef"}
     assert len(out["placed"]) == 1 and out["failed"][0]["error"] == "yetersiz sanal bakiye"
 
 
@@ -118,6 +118,36 @@ def test_follow_account_skips_when_already_applied_or_broken(tmp_path, monkeypat
     out = pf.follow_account(broken, "http://web", 1, tmp_path, date(2026, 11, 26))
     assert out == {"account": 1, "strategy": "Takip", "status": "strategy_error", "error": "onBar() hatası"}
     assert broken.posted == []
+
+
+def test_holiday_does_not_reapply_same_data_day(tmp_path, monkeypatch):
+    # Thursday's run applied the 2026-10-28 signals; Friday 29 Oct is a holiday, the latest bar is still the 28th
+    strategy = {"id": 7, "name": "Takip", "code": "x", "config": {"symbols": ["THYAO"]}}
+    acc = {"id": 1, "strategy_id": 7, "value": 1, "positions": [],
+           "trades": [{"note": "Takip: [veri 2026-10-28] hedef", "traded_at": "2026-10-28 19:41:00"}]}
+    http = FakeHttp(acc, strategy)
+    monkeypatch.setattr(pf, "run_job", lambda job, d: {"ok": True, "asOf": "2026-10-28", "orders": [{"symbol": "THYAO", "side": "buy", "amount": 5}]})
+    out = pf.follow_account(http, "http://web", 1, tmp_path, date(2026, 10, 29))
+    assert out["status"] == "already_applied" and out["as_of"] == "2026-10-28" and http.posted == []
+    monkeypatch.setattr(pf, "run_job", lambda job, d: {"ok": True, "asOf": "2026-10-30", "orders": [{"symbol": "THYAO", "side": "buy", "amount": 5}]})
+    assert pf.follow_account(http, "http://web", 1, tmp_path, date(2026, 10, 30))["status"] == "applied"
+
+
+def test_non_json_error_page_does_not_abort_remaining_orders(tmp_path, monkeypatch):
+    class HtmlError(FakeResp):
+        text = "<html>502 Bad Gateway</html>"
+
+        def json(self):
+            raise ValueError("not json")
+
+    http = FakeHttp({"id": 1, "strategy_id": 7, "value": 1, "positions": [], "trades": []},
+                    {"id": 7, "name": "T", "code": "x", "config": {"symbols": ["A", "B"]}})
+    http.post = lambda url, json=None, timeout=None: (http.posted.append(json) or (HtmlError(None, 502) if json["symbol"] == "A" else FakeResp({"ok": True})))
+    monkeypatch.setattr(pf, "run_job", lambda job, d: {"ok": True, "asOf": "2026-11-06",
+                                                       "orders": [{"symbol": "A", "side": "sell", "shares": 1}, {"symbol": "B", "side": "buy", "amount": 9}]})
+    out = pf.follow_account(http, "http://web", 1, tmp_path, date(2026, 11, 26))
+    assert [o["symbol"] for o in out["placed"]] == ["B"]
+    assert out["failed"][0]["error"].startswith("HTTP 502")
 
 
 def test_run_only_follows_linked_accounts_and_survives_errors(tmp_path, monkeypatch):

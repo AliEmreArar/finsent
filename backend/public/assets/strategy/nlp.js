@@ -122,8 +122,10 @@
     let symbols = extractSymbols(text, opts.knownSymbols);
     if (rule.id === 'risk_off_gold') {
       // risky asset first, safe asset second; default to the index and gram gold
-      const risk = symbols.find((s) => s !== 'ALTIN' && s !== 'USDTRY') || 'XU100';
-      const safe = /dolar|usd/.test(t) ? 'USDTRY' : 'ALTIN';
+      // safe havens are never the risky leg; the one the user names (silver, ounce gold, dollar) is the safe leg
+      const HAVENS = ['ALTIN', 'XAUUSD', 'GUMUS', 'XAGUSD', 'USDTRY'];
+      const risk = symbols.find((s) => !HAVENS.includes(s)) || 'XU100';
+      const safe = symbols.find((s) => HAVENS.includes(s)) || (/dolar|usd/.test(t) ? 'USDTRY' : /gümüş|gumus/.test(t) ? 'GUMUS' : 'ALTIN');
       symbols = [risk, safe];
       if (!/xu100|endeks|bist/.test(t) && risk === 'XU100') assumptions.push('Riskli varlık olarak BIST 100 endeksi kullanıldı.');
     }
