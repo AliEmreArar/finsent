@@ -267,10 +267,10 @@ test('every template compiles and runs on multi-symbol random data', () => {
   const data = {};
   syms.forEach((s, k) => {
     const c = randomWalk(800, 100 + k, 0.0005, 0.03);
-    data[s] = makeSeries(c, '2019-01-01', { sentiment: c.map((_, i) => (i % 37 === 0 ? 0.8 : null)) });
+    data[s] = makeSeries(c, '2019-01-01', { sentiment: c.map((_, i) => (i % 37 === 0 ? 0.8 : null)), volume: c.map((_, i) => (i % 29 === 0 ? 5000 : 1000)) });
   });
   for (const t of TEMPLATES) {
-    const r = E.backtest({ code: t.code, data, config: { initialCapital: 100000 } });
+    const r = E.backtest({ code: t.code, data, config: { initialCapital: 100000 } });   // 4 symbols: risk_off_gold uses the first two
     assert.equal(r.equity.length, 800, t.id);
     assert.ok(r.equity.every((v) => Number.isFinite(v) && v > 0), t.id);
     assert.ok(r.finalCash >= -1e-6, `${t.id} negative cash`);
@@ -498,4 +498,28 @@ test('fill=close still reports the last bar orders as signals', () => {
   assert.equal(r.signals.length, 1);
   assert.equal(r.signals[0].side, 'target');
   assert.equal(r.signals[0].targetPercent, 30);
+});
+
+test('offline parser: gold rotation and volume breakout', () => {
+  const g = NLP.parse('BIST 100 150 günlük ortalamanın altına inince altına geç, üstüne çıkınca endekse dön');
+  assert.equal(g.templateId, 'risk_off_gold');
+  assert.deepEqual(g.symbols, ['XU100', 'ALTIN']);
+  assert.equal(E.resolveParams(E.compileStrategy(g.code)).trend, 150);
+  const v = NLP.parse('30 günlük zirveyi 3 kat hacimle kırınca al');
+  assert.equal(v.templateId, 'volume_breakout');
+  const p = E.resolveParams(E.compileStrategy(v.code));
+  assert.equal(p.lookback, 30); assert.equal(p.volMult, 3);
+});
+
+test('gold rotation switches between the two assets and needs two symbols', () => {
+  const up = randomWalk(600, 31, 0.002, 0.01), down = randomWalk(600, 32, -0.002, 0.01);
+  const risk = makeSeries(up.concat(down.map((x) => (x * up.at(-1)) / 100)).slice(0, 1000));
+  const safe = makeSeries(new Array(1000).fill(0).map((_, i) => 100 + i * 0.05));
+  const code = TEMPLATES.find((t) => t.id === 'risk_off_gold').code;
+  const r = E.backtest({ code, data: { XU100: risk, ALTIN: safe }, config: { commissionBps: 0, slippageBps: 0 } });
+  assert.ok(r.fills.some((f) => f.sym === 'XU100' && f.side === 'buy'));
+  assert.ok(r.fills.some((f) => f.sym === 'ALTIN' && f.side === 'buy'));
+  const after = r.exposure.slice(220);   // after the 200-day average has warmed up
+  assert.ok(after.filter((x) => x > 0.9).length / after.length > 0.95, 'always invested in one of the two');
+  assert.throws(() => E.backtest({ code, data: { XU100: risk } }), /iki sembol/);
 });

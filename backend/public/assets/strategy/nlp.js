@@ -35,6 +35,8 @@
   }
 
   const RULES = [
+    { id: 'risk_off_gold', re: /(altına geç|altına kaç|altına dön|güvenli liman|riskten kaç|altın(a|la)? (rotasyon|geçiş)|endeks.*altın|altın.*endeks)/ },
+    { id: 'volume_breakout', re: /(hacim|hacimli|işlem hacmi).*(kır|zirve|patla)|(kır|zirve).*(hacim|hacimli)/ },
     { id: 'momentum_rotation', re: /(rotasyon|en güçlü|en çok (yükselen|kazandıran)|momentum.*(ilk|en iyi)|(ilk|en iyi) \d+ hisse)/ },
     { id: 'kap_sentiment', re: /(\bkap\b|\bkap'|haber|bildirim|duygu|sentiment|olumlu)/ },
     { id: 'dca', re: /(her ay|aylık al|düzenli (al|birikim)|birikim|dca)/ },
@@ -93,6 +95,11 @@
       set('hold', grab(t, [/(\d+)\s*(?:gün|işlem günü)\s*(?:tut|bekle|elde)/, /(?:tut|bekle)\w*\s*(\d+)\s*gün/]));
       set('minScore', grab(t, [/(?:skor|puan)\w*\s*(\d+(?:[.,]\d+)?)/]));
       set('maxPositions', grab(t, [/en fazla\s*(\d+)\s*(?:pozisyon|hisse)/]));
+    } else if (rule.id === 'risk_off_gold') {
+      set('trend', grab(t, [/(\d+)\s*(?:günlük|gün)\w*\s*(?:ortalama|sma|trend)/]));
+    } else if (rule.id === 'volume_breakout') {
+      set('lookback', grab(t, [/(\d+)\s*(?:günlük|gün)\w*\s*(?:zirve|en yüksek|tepe)/]));
+      set('volMult', grab(t, [/(\d+(?:[.,]\d+)?)\s*(?:kat|x)\b/, /hacim\w*\s*(\d+(?:[.,]\d+)?)\s*kat/]));
     } else if (rule.id === 'dca') {
       set('months', grab(t, [/(\d+)\s*ay(?:da|a||\s)/]));
     }
@@ -112,7 +119,14 @@
 
     const timeframe = /haftalık (mum|bar|kapanış|grafik)|haftalık bazda|haftalık olarak|weekly/.test(t) ? '1w' : /aylık (mum|bar|kapanış|grafik)|aylık bazda|monthly/.test(t) ? '1mo' : '1d';
     if (timeframe !== '1d') assumptions.push(`${timeframe === '1w' ? 'Haftalık' : 'Aylık'} mumlar kullanıldı; periyotlar mum sayısıdır.`);
-    const symbols = extractSymbols(text, opts.knownSymbols);
+    let symbols = extractSymbols(text, opts.knownSymbols);
+    if (rule.id === 'risk_off_gold') {
+      // risky asset first, safe asset second; default to the index and gram gold
+      const risk = symbols.find((s) => s !== 'ALTIN' && s !== 'USDTRY') || 'XU100';
+      const safe = /dolar|usd/.test(t) ? 'USDTRY' : 'ALTIN';
+      symbols = [risk, safe];
+      if (!/xu100|endeks|bist/.test(t) && risk === 'XU100') assumptions.push('Riskli varlık olarak BIST 100 endeksi kullanıldı.');
+    }
     return {
       provider: 'rules', templateId: tpl.id, name: tpl.name,
       summary: tpl.summary + ' (Kural tabanlı çevirici: Grok bağlı değilken en yakın hazır şablon seçildi ve sayılar metinden alındı.)',
