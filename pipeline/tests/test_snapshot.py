@@ -66,3 +66,20 @@ def test_value_conversion_for_mysql():
     assert snapshot._to_db(pd.NaT) is None and snapshot._to_db(np.bool_(True)) is True
     df = snapshot._clean_frame(pd.DataFrame({"p": [Decimal("1.5"), None], "s": [b"\xc3\xa7", None]}))
     assert df["p"].dtype == float and df["s"][0] == "ç"
+
+
+def test_seed_from_local_folder_needs_no_network(tmp_path, settings):
+    _release(tmp_path)
+    with mock.patch.object(snapshot, "latest_release", side_effect=AssertionError("network")), \
+         mock.patch.object(snapshot, "load_tables", return_value={"companies": 1}):
+        out = snapshot.seed(settings, lake=False, from_dir=tmp_path / "release")
+    assert out["tables"] == {"companies": 1} and out["release"].startswith("local:")
+    assert (tmp_path / "data" / "market" / "bist_updates.db").read_bytes() == b"sqlite-bytes"
+    assert (tmp_path / "release" / "tables__companies.parquet").exists()   # source folder untouched
+
+
+def test_seed_from_local_folder_rejects_incomplete_copy(tmp_path, settings):
+    _release(tmp_path, tamper=True)
+    with mock.patch.object(snapshot, "load_tables") as load, pytest.raises(RuntimeError, match="checksum"):
+        snapshot.seed(settings, lake=False, from_dir=tmp_path / "release")
+    load.assert_not_called()

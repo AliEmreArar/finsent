@@ -134,6 +134,7 @@ def main(argv: list[str] | None = None) -> None:
     sd.add_argument("--tag", help="a specific release tag (default: newest data-*)")
     sd.add_argument("--no-lake", action="store_true", help="skip rebuilding the S3 lake")
     sd.add_argument("--keep-downloads", action="store_true")
+    sd.add_argument("--from-dir", type=Path, help="load a local export-snapshot folder (e.g. copied with scp) instead of a release")
 
     sub.add_parser("jarvis-push", help="upload a compact snapshot to the Jarvis assistant (JARVIS_URL/JARVIS_TOKEN)")
     sub.add_parser("kap-topics", help="KAP event-type study (reaction and 20-day drift by topic) -> research_results")
@@ -160,7 +161,8 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.cmd == "seed":
         from .snapshot import seed
-        print(json.dumps(seed(settings, tag=args.tag, lake=not args.no_lake, keep_downloads=args.keep_downloads),
+        print(json.dumps(seed(settings, tag=args.tag, lake=not args.no_lake, keep_downloads=args.keep_downloads,
+                                         from_dir=args.from_dir),
                          indent=2, default=str))
         return
     if args.cmd == "rebuild-lake":

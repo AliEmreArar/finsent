@@ -224,23 +224,50 @@ def load_tables(settings: Settings, folder: Path, tables: list[str] = TABLES) ->
     return counts
 
 
+def _stage_local(src: Path, work: Path) -> dict:
+    """Use an `export-snapshot` folder (flat names, e.g. copied over with scp) instead of a release."""
+    manifest = json.loads((src / "manifest.json").read_text(encoding="utf-8"))
+    for rel_path, meta in manifest["files"].items():
+        flat = src / _asset_name(rel_path)
+        if not flat.exists():
+            raise RuntimeError(f"missing {flat}")
+        if _sha256(flat) != meta["sha256"]:
+            raise RuntimeError(f"checksum mismatch for {flat} (incomplete copy?)")
+        dst = work / rel_path
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.resolve() != flat.resolve():
+            try:
+                if dst.exists():
+                    dst.unlink()
+                os.link(flat, dst)              # hard link: no extra disk space
+            except OSError:
+                shutil.copy2(flat, dst)
+    return manifest
+
+
 def seed(settings: Settings, tag: str | None = None, workdir: Path | None = None, lake: bool = True,
-         keep_downloads: bool = False) -> dict:
+         keep_downloads: bool = False, from_dir: Path | None = None) -> dict:
     data_dir = Path(settings.market_updates_path).parent.parent        # <repo>/data
     work = Path(workdir or data_dir / "snapshot")
-    rel = latest_release(tag=tag)
-    assets = {a["name"]: a["browser_download_url"] for a in rel["assets"]}
-    log.info("seeding from %s (%s), %d assets", rel["tag_name"], rel["html_url"], len(assets))
-    _download(assets["manifest.json"], work / "manifest.json")
-    manifest = json.loads((work / "manifest.json").read_text(encoding="utf-8"))
+    if from_dir:
+        log.info("seeding from local folder %s", from_dir)
+        manifest = _stage_local(Path(from_dir), work)
+        source = f"local:{from_dir}"
+    else:
+        rel = latest_release(tag=tag)
+        assets = {a["name"]: a["browser_download_url"] for a in rel["assets"]}
+        log.info("seeding from %s (%s), %d assets", rel["tag_name"], rel["html_url"], len(assets))
+        _download(assets["manifest.json"], work / "manifest.json")
+        manifest = json.loads((work / "manifest.json").read_text(encoding="utf-8"))
+        source = rel["tag_name"]
 
-    for rel_path, meta in manifest["files"].items():
-        dst = work / rel_path
-        if not (dst.exists() and _sha256(dst) == meta["sha256"]):
-            log.info("downloading %s (%.1f MB)", rel_path, meta["size"] / 1e6)
-            _download(assets[_asset_name(rel_path)], dst)
-        if _sha256(dst) != meta["sha256"]:
-            raise RuntimeError(f"checksum mismatch for {rel_path}")
+        for rel_path, meta in manifest["files"].items():
+            dst = work / rel_path
+            if not (dst.exists() and _sha256(dst) == meta["sha256"]):
+                log.info("downloading %s (%.1f MB)", rel_path, meta["size"] / 1e6)
+                _download(assets[_asset_name(rel_path)], dst)
+            if _sha256(dst) != meta["sha256"]:
+                raise RuntimeError(f"checksum mismatch for {rel_path}")
 
     # market files -> data/market, models -> data/models
     (data_dir / "market").mkdir(parents=True, exist_ok=True)
@@ -254,12 +281,12 @@ def seed(settings: Settings, tag: str | None = None, workdir: Path | None = None
             shutil.copy2(work / rel_path, data_dir / "models" / Path(rel_path).name)
 
     counts = load_tables(settings, work)
-    out = {"release": rel["tag_name"], "tables": counts}
+    out = {"release": source, "tables": counts}
     if lake:
         from .lake_rebuild import rebuild
 
         start, end = manifest["coverage"]["disclosures"]
         out["lake"] = rebuild(settings, date.fromisoformat(start[:10]), date.fromisoformat(end[:10]))
-    if not keep_downloads:
+    if not keep_downloads and not (from_dir and Path(from_dir).resolve() == work.resolve()):
         shutil.rmtree(work, ignore_errors=True)
     return out
