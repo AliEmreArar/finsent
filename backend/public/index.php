@@ -99,6 +99,7 @@ $router->post('/api/paper', [PaperController::class, 'create']);
 $router->get('/api/paper/{id}', [PaperController::class, 'show']);
 $router->post('/api/paper/{id}/order', [PaperController::class, 'order']);
 $router->post('/api/paper/{id}/reset', [PaperController::class, 'reset']);
+$router->post('/api/paper/{id}/link', [PaperController::class, 'link']);
 $router->post('/api/paper/{id}/delete', [PaperController::class, 'delete']);
 
 try {

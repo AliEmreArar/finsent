@@ -47,6 +47,43 @@
     await render(cur.id);
   };
 
+  // "Stratejiyi takip et": link a saved strategy and apply its signals for the latest day
+  async function renderFollow(a) {
+    const box = $('#pp-follow');
+    let list = [];
+    try { list = (await api('/strategies')).strategies; } catch { list = []; }
+    const linked = list.find((x) => x.id === a.strategy_id);
+    box.innerHTML = `<div class="card-head"><h2>Stratejiyi takip et</h2><span class="hint">bağlı strateji her gün son kapanışa göre sinyal üretir</span></div>
+      <div class="toolbar" style="margin:0 0 10px"><select class="field" id="pp-strat"><option value="">(strateji bağlı değil)</option>
+        ${list.map((x) => `<option value="${x.id}" ${x.id === a.strategy_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+        ${list.length ? '' : '<span class="muted small">Önce Strateji Laboratuvarı\'nda bir strateji kaydet.</span>'}</div>
+      <div id="pp-sig">${linked ? '<div class="empty"><span class="spinner"></span> Sinyaller hesaplanıyor…</div>' : '<div class="muted small">Bir strateji bağlarsan, bu sayfayı her açtığında o stratejinin bugünkü al/sat sinyallerini görür ve tek tıkla bu portföye uygularsın. Gerçek emir iletilmez.</div>'}</div>`;
+    $('#pp-strat').onchange = async (e) => {
+      await api(`/paper/${a.id}/link`, { method: 'POST', body: JSON.stringify({ strategy_id: e.target.value || null }) });
+      a.strategy_id = e.target.value ? Number(e.target.value) : null;
+      renderFollow(a);
+    };
+    if (!linked) return;
+    if (!window.labSignalsFor) { $('#pp-sig').innerHTML = '<div class="muted small">Strateji motoru yüklenemedi.</div>'; return; }
+    try {
+      const r = await window.labSignalsFor(linked.id);
+      const already = a.last_trade_at && a.last_trade_at.slice(0, 10) >= new Date().toISOString().slice(0, 10)
+        && a.trades.some((t) => (t.note || '').startsWith(`${r.name}:`) && t.traded_at.slice(0, 10) === a.last_trade_at.slice(0, 10));
+      const tag = (s) => (s.side === 'buy' ? ['AL', 'pos'] : s.side === 'sell' ? ['SAT', 'neg'] : ['HEDEF', 'acc']);
+      $('#pp-sig').innerHTML = `<div class="muted small" style="margin-bottom:8px">${esc(r.name)} · son veri ${fdate(r.asOf)}${already ? ' · <span class="up">bugün zaten uygulandı</span>' : ''}</div>
+        ${r.signals.length ? `<div class="rows">${r.signals.map((s) => `<div class="row" style="cursor:default"><span class="pill ${tag(s)[1]}">${tag(s)[0]}</span><b>${esc(s.sym)}</b>
+          <span class="muted small" style="flex:1">${esc(s.reason)}</span>${Number.isFinite(s.targetPercent) ? `<span class="num small">ağırlık %${num(s.targetPercent, 0)}</span>` : Number.isFinite(s.percent) ? `<span class="num small">%${num(s.percent, 0)}</span>` : ''}</div>`).join('')}</div>
+          <div class="toolbar" style="margin:10px 0 0"><button class="btn sm primary" id="pp-apply" ${already ? 'disabled' : ''}>Sinyalleri uygula</button></div>`
+          : '<div class="muted small">Bugün için yeni sinyal yok: strateji mevcut pozisyonları korur.</div>'}`;
+      $('#pp-apply').onclick = async () => {
+        $('#pp-apply').disabled = true;
+        const res = await window.labApplySignals(a.id, r.signals, r.symbols.length, r.name);
+        toast(`${res.done.length} emir uygulandı${res.failed.length ? `, ${res.failed.length} başarısız` : ''}`);
+        render(a.id);
+      };
+    } catch (e) { $('#pp-sig').innerHTML = `<div class="down small">${esc(e.message)}</div>`; }
+  }
+
   async function render(id) {
     const a = await api(`/paper/${id}`);
     const body = $('#pp-body');
@@ -76,6 +113,7 @@
           </div>
           <p class="muted small" style="margin:10px 0 0">Fiyat: piyasa açıkken Yahoo'nun ~15 dk gecikmeli fiyatı, değilse son kapanış. Gerçek emir iletilmez.</p></div>
       </div>
+      <div class="card" style="margin-top:16px" id="pp-follow"></div>
       <div class="card" style="margin-top:16px"><div class="card-head"><h2>Pozisyonlar</h2><span class="hint">son kapanış fiyatıyla</span></div>
         ${a.positions.length ? `<div class="tbl-wrap"><table class="tbl"><tr><th>Sembol</th><th>Adet</th><th>Ort. maliyet</th><th>Fiyat</th><th>Gün</th><th>Değer</th><th>Ağırlık</th><th>K/Z</th><th></th></tr>
           ${a.positions.map((p) => `<tr><td><a href="#/hisse/${esc(p.symbol)}"><b>${esc(p.symbol)}</b></a></td><td class="num">${num(p.shares, 0)}</td><td class="num">${num(p.avg_price)}</td>
@@ -88,6 +126,7 @@
           ${a.trades.map((t) => `<tr><td>${fdate(t.traded_at, true)}</td><td><b>${esc(t.symbol)}</b></td><td><span class="pill ${t.side === 'buy' ? 'pos' : 'neg'}">${t.side === 'buy' ? 'AL' : 'SAT'}</span></td>
             <td class="num">${num(t.shares, 0)}</td><td class="num">${num(t.price)}</td><td class="num">${tl(t.shares * t.price)}</td><td class="num">${num(t.fee)}</td><td class="muted small">${esc(t.price_source)}</td><td class="muted small">${esc(t.note || '')}</td></tr>`).join('')}</table></div>` : '<div class="empty">İşlem yok.</div>'}</div>`;
 
+    renderFollow(a);
     const h = a.history;
     chart('pp-chart', {
       type: 'line',

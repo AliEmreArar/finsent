@@ -380,4 +380,10 @@ Kullanıcı stratejisini doğal dille anlatır, Grok bunu çalıştırılabilir 
 - *XSS:* Parametreler worker'da yalnızca sayı ve mantıksal değer olarak dışarı çıkar ve öznitelikler sayıya zorlanır. Kayıtlı listede `trades` biçimlendirilir.
 - *Sanal portföy:* Emirler hesap satırı kilitlenerek (`FOR UPDATE`) işlemde yazılır. Fiyat kaynağı etiketi sütuna sığacak şekilde kısaltıldı.
 
+**Stratejiyi takip et (sanal portföy):**
+- Portföy sayfasında kayıtlı bir strateji portföye bağlanabilir (`POST /api/paper/{id}/link {strategy_id}`, `paper_accounts.strategy_id`).
+- Sayfa her açıldığında strateji kendi ayarlarıyla son 1 yıl + ısınma verisinde tarayıcıda çalıştırılır (`window.labSignalsFor`) ve bugünün sinyalleri listelenir.
+- "Sinyalleri uygula", laboratuvarla ortak `window.labApplySignals` fonksiyonunu kullanır: hedef ağırlık, kısmi satış ve tutar aynı anlamla emre çevrilir.
+- Aynı gün aynı stratejiden işlem varsa "bugün zaten uygulandı" gösterilir ve düğme kapatılır.
+
 **Açık fikirler:** gün içi bar desteği, açığa satış, sanal portföyü bir stratejiye bağlayıp her gün otomatik uygulamak (DAG görevi).
